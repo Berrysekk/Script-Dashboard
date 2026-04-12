@@ -30,6 +30,7 @@ class ScriptUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     loop_interval: Optional[str] = None
+    loop_enabled: Optional[bool] = None
 
 
 class LoopRequest(BaseModel):
