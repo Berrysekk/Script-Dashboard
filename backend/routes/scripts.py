@@ -1,9 +1,10 @@
 import uuid, json, zipfile, io, shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from backend.db import get_db, SCRIPTS_DIR
+import backend.db as _db
+from backend.db import get_db
 from backend.models import ScriptUpdateRequest, LoopRequest
 
 router = APIRouter()
@@ -32,7 +33,7 @@ async def upload_script(
     description: Optional[str] = Form(None),
 ):
     script_id  = str(uuid.uuid4())
-    script_dir  = SCRIPTS_DIR / script_id
+    script_dir  = _db.SCRIPTS_DIR / script_id
     script_dir.mkdir(parents=True, exist_ok=True)
     (script_dir / "output").mkdir(exist_ok=True)
 
@@ -48,7 +49,7 @@ async def upload_script(
             (script_dir / "script.py").write_bytes(data)
             if "requirements.txt" in zf.namelist():
                 (script_dir / "requirements.txt").write_bytes(zf.read("requirements.txt"))
-        filename = py_files[0]
+        filename = Path(py_files[0]).name
     else:
         (script_dir / "script.py").write_bytes(content)
 
@@ -56,7 +57,7 @@ async def upload_script(
     meta = {
         "id": script_id, "name": display_name, "filename": filename,
         "description": description, "loop_enabled": False,
-        "loop_interval": None, "created_at": datetime.utcnow().isoformat(),
+        "loop_interval": None, "created_at": datetime.now(timezone.utc).isoformat(),
     }
     (script_dir / "meta.json").write_text(json.dumps(meta))
 
@@ -128,6 +129,8 @@ async def patch_script(script_id: str, body: ScriptUpdateRequest):
             await db.execute("UPDATE scripts SET description=? WHERE id=?", (body.description, script_id))
         if body.loop_interval is not None:
             await db.execute("UPDATE scripts SET loop_interval=? WHERE id=?", (body.loop_interval, script_id))
+        if body.loop_enabled is not None:
+            await db.execute("UPDATE scripts SET loop_enabled=? WHERE id=?", (int(body.loop_enabled), script_id))
         await db.commit()
     return await get_script(script_id)
 
@@ -141,7 +144,7 @@ async def delete_script(script_id: str):
         await db.execute("DELETE FROM runs WHERE script_id = ?", (script_id,))
         await db.execute("DELETE FROM scripts WHERE id = ?", (script_id,))
         await db.commit()
-    script_dir = SCRIPTS_DIR / script_id
+    script_dir = _db.SCRIPTS_DIR / script_id
     if script_dir.exists():
         shutil.rmtree(script_dir)
     return {"ok": True}
@@ -179,7 +182,7 @@ async def stop_script(script_id: str):
 @router.post("/scripts/{script_id}/reinstall")
 async def reinstall_deps(script_id: str):
     from backend.services import executor
-    script_dir = SCRIPTS_DIR / script_id
+    script_dir = _db.SCRIPTS_DIR / script_id
     venv_dir   = script_dir / "venv"
     if venv_dir.exists():
         shutil.rmtree(venv_dir)
@@ -189,7 +192,7 @@ async def reinstall_deps(script_id: str):
 
 @router.get("/scripts/{script_id}/output")
 async def list_output(script_id: str):
-    output_dir = SCRIPTS_DIR / script_id / "output"
+    output_dir = _db.SCRIPTS_DIR / script_id / "output"
     if not output_dir.exists():
         return []
     files = []
@@ -199,7 +202,7 @@ async def list_output(script_id: str):
             files.append({
                 "filename": f.name,
                 "size":     stat.st_size,
-                "modified": datetime.utcfromtimestamp(stat.st_mtime).isoformat(),
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             })
     return files
 
@@ -207,7 +210,10 @@ async def list_output(script_id: str):
 @router.get("/scripts/{script_id}/output/{filename}")
 async def download_output(script_id: str, filename: str):
     from fastapi.responses import FileResponse
-    output_file = SCRIPTS_DIR / script_id / "output" / filename
+    output_dir = _db.SCRIPTS_DIR / script_id / "output"
+    output_file = (output_dir / filename).resolve()
+    if not str(output_file).startswith(str(output_dir.resolve())):
+        raise HTTPException(400, "Invalid filename")
     if not output_file.exists() or not output_file.is_file():
         raise HTTPException(404, "Output file not found")
     return FileResponse(output_file, filename=filename)
@@ -215,7 +221,10 @@ async def download_output(script_id: str, filename: str):
 
 @router.delete("/scripts/{script_id}/output/{filename}")
 async def delete_output(script_id: str, filename: str):
-    output_file = SCRIPTS_DIR / script_id / "output" / filename
+    output_dir = _db.SCRIPTS_DIR / script_id / "output"
+    output_file = (output_dir / filename).resolve()
+    if not str(output_file).startswith(str(output_dir.resolve())):
+        raise HTTPException(400, "Invalid filename")
     if not output_file.exists():
         raise HTTPException(404, "Output file not found")
     output_file.unlink()
