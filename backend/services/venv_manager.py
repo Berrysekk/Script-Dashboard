@@ -21,7 +21,9 @@ async def create_venv(
     )
     async for line in proc.stdout:
         emit(line.decode())
-    await proc.wait()
+    rc = await proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"venv creation failed with exit code {rc}")
 
     req_file = script_dir / "requirements.txt"
     if req_file.exists():
