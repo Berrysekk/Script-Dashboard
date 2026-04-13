@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 import backend.db as _db
 from backend.services.venv_manager import venv_exists, create_venv
@@ -120,3 +120,64 @@ async def _execute(
             (exit_code, status, run_id),
         )
         await db.commit()
+
+
+def get_next_run(script_id: str) -> str | None:
+    """Return ISO timestamp of next scheduled run, or None if not looping."""
+    dt = _next_run.get(script_id)
+    return dt.isoformat() if dt else None
+
+
+def is_looping(script_id: str) -> bool:
+    """Return True if a loop task is active for this script."""
+    task = _loop_tasks.get(script_id)
+    return task is not None and not task.done()
+
+
+async def start_loop(script_id: str, interval: str) -> None:
+    """Start a looping run task for script_id. No-op if already looping."""
+    if is_looping(script_id):
+        return
+    seconds = parse_interval(interval)
+    _loop_tasks[script_id] = asyncio.create_task(
+        _loop_worker(script_id, seconds)
+    )
+    async with _db.get_db() as db:
+        await db.execute(
+            "UPDATE scripts SET loop_enabled=1, loop_interval=? WHERE id=?",
+            (interval, script_id),
+        )
+        await db.commit()
+
+
+async def stop_loop(script_id: str) -> None:
+    """Cancel the loop task for script_id and clear loop state in DB."""
+    task = _loop_tasks.pop(script_id, None)
+    if task and not task.done():
+        task.cancel()
+    _next_run.pop(script_id, None)
+    async with _db.get_db() as db:
+        await db.execute(
+            "UPDATE scripts SET loop_enabled=0 WHERE id=?",
+            (script_id,),
+        )
+        await db.commit()
+
+
+async def _loop_worker(script_id: str, seconds: int) -> None:
+    """Repeatedly run script_id every `seconds` seconds until cancelled."""
+    try:
+        while True:
+            try:
+                await run_script(script_id)
+            except Exception as exc:
+                # Script launch failed — log and keep looping
+                import logging
+                logging.getLogger(__name__).error(
+                    "Loop run failed for %s: %s", script_id, exc
+                )
+            _next_run[script_id] = datetime.now() + timedelta(seconds=seconds)
+            await asyncio.sleep(seconds)
+    except asyncio.CancelledError:
+        _next_run.pop(script_id, None)
+        raise
