@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
-from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest
 
 router = APIRouter()
 
@@ -252,3 +252,48 @@ async def update_script_code(script_id: str, body: CodeUpdateRequest):
     script_file = _db.SCRIPTS_DIR / script_id / "script.py"
     script_file.write_text(body.code, encoding="utf-8")
     return {"ok": True}
+
+
+@router.get("/scripts/{script_id}/requirements")
+async def get_requirements(script_id: str):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+    req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
+    return {"requirements": req_file.read_text(encoding="utf-8") if req_file.exists() else ""}
+
+
+@router.put("/scripts/{script_id}/requirements")
+async def update_requirements(script_id: str, body: RequirementsUpdateRequest):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+    req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
+    if body.requirements.strip():
+        req_file.write_text(body.requirements, encoding="utf-8")
+    elif req_file.exists():
+        req_file.unlink()
+    return {"ok": True}
+
+
+@router.post("/scripts/{script_id}/requirements/reinstall")
+async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest):
+    """Write requirements.txt, delete venv, then trigger a fresh reinstall run."""
+    from backend.services import executor
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+    req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
+    if body.requirements.strip():
+        req_file.write_text(body.requirements, encoding="utf-8")
+    elif req_file.exists():
+        req_file.unlink()
+    # Nuke the venv so it gets rebuilt with the new requirements
+    venv_dir = _db.SCRIPTS_DIR / script_id / "venv"
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir)
+    run_id = await executor.run_script(script_id)
+    return {"ok": True, "run_id": run_id}

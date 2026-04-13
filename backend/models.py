@@ -39,3 +39,7 @@ class LoopRequest(BaseModel):
 
 class CodeUpdateRequest(BaseModel):
     code: str
+
+
+class RequirementsUpdateRequest(BaseModel):
+    requirements: str

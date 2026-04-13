@@ -181,6 +181,117 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
   );
 }
 
+// ── Requirements editor ─────────────────────────────────────────────────────
+function RequirementsEditor({ scriptId, onReinstallStarted }: {
+  scriptId: string;
+  onReinstallStarted: () => void;
+}) {
+  const [reqs, setReqs]         = useState<string | null>(null);
+  const [saving, setSaving]     = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [saved, setSaved]       = useState(false);
+  const [error, setError]       = useState("");
+  const textareaRef             = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    fetch(`/api/scripts/${scriptId}/requirements`)
+      .then(r => r.json())
+      .then(d => setReqs(d.requirements));
+  }, [scriptId]);
+
+  // Auto-resize
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.max(ta.scrollHeight, 80)}px`;
+  }, [reqs]);
+
+  const saveOnly = async () => {
+    if (reqs === null) return;
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}/requirements`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requirements: reqs }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
+  };
+
+  const saveAndReinstall = async () => {
+    if (reqs === null) return;
+    setInstalling(true); setError("");
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}/requirements/reinstall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requirements: reqs }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      onReinstallStarted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setInstalling(false); }
+  };
+
+  if (reqs === null) return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <p className="text-xs text-gray-400">Loading requirements…</p>
+    </section>
+  );
+
+  return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          Requirements
+          <span className="ml-2 font-normal normal-case text-gray-400">requirements.txt</span>
+        </p>
+        <span className="text-[10px] text-gray-400">one package per line</span>
+      </div>
+
+      <textarea
+        ref={textareaRef}
+        value={reqs}
+        onChange={e => setReqs(e.target.value)}
+        spellCheck={false}
+        placeholder={"requests\npandas>=2.0\nnumpy"}
+        className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
+          rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
+          focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[80px]"
+        style={{ overflow: "hidden" }}
+      />
+
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          onClick={saveOnly}
+          disabled={saving || installing}
+          className="text-xs border border-gray-200 dark:border-neutral-700 px-3 py-1.5 rounded disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          onClick={saveAndReinstall}
+          disabled={saving || installing}
+          className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
+        >
+          {installing ? "Reinstalling…" : "Save & Reinstall"}
+        </button>
+        {saved && <span className="text-xs text-green-500">✓ Saved</span>}
+        <span className="text-[10px] text-gray-400 ml-auto">Reinstall rebuilds the venv with updated packages</span>
+      </div>
+    </section>
+  );
+}
+
 // ── Main detail page ────────────────────────────────────────────────────────
 export default function ScriptDetail() {
   const { id }   = useParams<{ id: string }>();
@@ -388,6 +499,9 @@ export default function ScriptDetail() {
 
       {/* Code editor */}
       <CodeEditor scriptId={id} />
+
+      {/* Requirements editor */}
+      <RequirementsEditor scriptId={id} onReinstallStarted={fetchScript} />
 
       {/* Output files */}
       <OutputSection scriptId={id} />
