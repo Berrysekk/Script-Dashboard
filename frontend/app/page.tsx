@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import StatsBar    from "./components/StatsBar";
 import ScriptCard, { Script } from "./components/ScriptCard";
 import UploadModal from "./components/UploadModal";
 import LogDrawer   from "./components/LogDrawer";
@@ -20,6 +20,34 @@ function SidebarItem({ label, active, dot, onClick }: {
         ${dot==="green" ? "bg-green-400" : dot==="red" ? "bg-red-400" : "bg-gray-200 dark:bg-neutral-700"}`} />
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+function TopBarStats({ total, running, looping }: { total: number; running: number; looping: number }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+  const el = document.getElementById("topbar");
+  if (!el) return null;
+
+  return createPortal(
+    <div className="flex items-center gap-5 w-full px-5">
+      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 mr-2">Script Dashboard</span>
+      <span className="h-4 w-px bg-gray-200 dark:bg-neutral-700" />
+      <Stat label="Total" value={total}   color="text-gray-600 dark:text-gray-300" />
+      <Stat label="Running" value={running} color="text-green-500 dark:text-green-400" />
+      <Stat label="Looping" value={looping} color="text-amber-500 dark:text-amber-400" />
+    </div>,
+    el,
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className={`text-sm font-bold tabular-nums ${color}`}>{value}</span>
+      <span className="text-[11px] text-gray-400">{label}</span>
+    </div>
   );
 }
 
@@ -57,12 +85,9 @@ export default function Dashboard() {
     await refresh();
   };
 
-  const stats = {
-    total:     scripts.length,
-    running:   scripts.filter(s => s.status === "running").length,
-    looping:   scripts.filter(s => s.loop_enabled).length,
-    runsToday: 0,
-  };
+  const total   = scripts.length;
+  const running = scripts.filter(s => s.status === "running").length;
+  const looping = scripts.filter(s => s.loop_enabled).length;
 
   const filteredScripts = scripts.filter(s => {
     if (filter === "running") return s.status === "running" || s.loop_enabled;
@@ -72,19 +97,21 @@ export default function Dashboard() {
 
   return (
     <>
+      <TopBarStats total={total} running={running} looping={looping} />
+
       <aside className="w-48 bg-white dark:bg-neutral-900 border-r border-gray-200 dark:border-neutral-800 flex flex-col py-3 gap-0.5 shrink-0">
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 py-2">Views</p>
-        <SidebarItem label="All Scripts" active={filter === "all"}    onClick={() => setFilter("all")} />
+        <SidebarItem label="All Scripts" active={filter === "all"}     onClick={() => setFilter("all")} />
         <SidebarItem label="Running"     active={filter === "running"} dot="green" onClick={() => setFilter("running")} />
-        <SidebarItem label="Idle"        active={filter === "idle"}   onClick={() => setFilter("idle")} />
+        <SidebarItem label="Idle"        active={filter === "idle"}    onClick={() => setFilter("idle")} />
 
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 pt-4 pb-2">Scripts</p>
         {scripts.map(s => (
           <Link
             key={s.id}
             href={`/scripts/${s.id}`}
-            className={`flex items-center gap-2 px-4 py-1.5 text-[12.5px] text-left w-full
-              text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-neutral-800`}
+            className="flex items-center gap-2 px-4 py-1.5 text-[12.5px] text-left w-full
+              text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-neutral-800"
           >
             <span className={`w-1.5 h-1.5 rounded-full shrink-0
               ${s.loop_enabled || s.status === "running" ? "bg-green-400"
@@ -94,10 +121,6 @@ export default function Dashboard() {
             <span className="truncate">{s.name}</span>
           </Link>
         ))}
-
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 pt-4 pb-2">Logs</p>
-        <SidebarItem label="By Date" />
-        <SidebarItem label="Downloads" />
       </aside>
 
       <main className="flex-1 overflow-y-auto p-5">
@@ -109,9 +132,11 @@ export default function Dashboard() {
             )}
           </p>
           <button onClick={() => setShowUpload(true)}
-            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded font-medium">+ Add Script</button>
+            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded font-medium">
+            + Add Script
+          </button>
         </div>
-        <StatsBar {...stats} />
+
         {filteredScripts.length === 0 ? (
           <p className="text-xs text-gray-400 mt-4">No scripts match this filter.</p>
         ) : (
