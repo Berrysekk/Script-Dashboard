@@ -3,26 +3,14 @@
   <Name>Script-Dashboard</Name>
   <Repository>ghcr.io/berrysekk/script-dashboard:latest</Repository>
   <Registry>https://ghcr.io</Registry>
-  <Network>bridge</Network>
+  <Network>br0</Network>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
   <Project>https://github.com/Berrysekk/Script-Dashboard</Project>
   <Overview>Self-hosted Python script management dashboard. Upload .py scripts, run them once or on a configurable loop, stream logs live in the browser, and browse output files — all in one Docker container.</Overview>
   <Category>Tools: Productivity:</Category>
-  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <WebUI>http://[IP]/</WebUI>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
-
-  <!-- Port: Web UI -->
-  <Config
-    Name="Web UI Port"
-    Target="80"
-    Default="7080"
-    Mode="tcp"
-    Description="Port to access the dashboard in your browser."
-    Type="Port"
-    Display="always"
-    Required="true"
-    Mask="false">7080</Config>
 
   <!-- Volume: persistent data (scripts, logs, SQLite DB) -->
   <Config
