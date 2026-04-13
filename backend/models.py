@@ -35,3 +35,7 @@ class ScriptUpdateRequest(BaseModel):
 
 class LoopRequest(BaseModel):
     interval: str   # e.g. "6h", "30m", "5s"
+
+
+class CodeUpdateRequest(BaseModel):
+    code: str

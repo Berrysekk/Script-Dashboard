@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
-from backend.models import ScriptUpdateRequest, LoopRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest
 
 router = APIRouter()
 
@@ -228,4 +228,27 @@ async def delete_output(script_id: str, filename: str):
     if not output_file.exists():
         raise HTTPException(404, "Output file not found")
     output_file.unlink()
+    return {"ok": True}
+
+
+@router.get("/scripts/{script_id}/code")
+async def get_script_code(script_id: str):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+    script_file = _db.SCRIPTS_DIR / script_id / "script.py"
+    if not script_file.exists():
+        raise HTTPException(404, "Script file not found")
+    return {"code": script_file.read_text(encoding="utf-8")}
+
+
+@router.put("/scripts/{script_id}/code")
+async def update_script_code(script_id: str, body: CodeUpdateRequest):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+    script_file = _db.SCRIPTS_DIR / script_id / "script.py"
+    script_file.write_text(body.code, encoding="utf-8")
     return {"ok": True}
