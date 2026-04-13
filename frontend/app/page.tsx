@@ -36,14 +36,21 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const handleRun  = async (id: string) => { await fetch(`/api/scripts/${id}/run`,  { method: "POST" }); refresh(); };
-  const handleStop = async (id: string) => { await fetch(`/api/scripts/${id}/stop`, { method: "POST" }); refresh(); };
+  const handleRun  = async (id: string) => {
+    await fetch(`/api/scripts/${id}/run`, { method: "POST" });
+    await refresh();
+  };
+  const handleStop = async (id: string) => {
+    await fetch(`/api/scripts/${id}/stop`, { method: "POST" });
+    await refresh();
+  };
   const handleLoop = async (id: string, interval: string) => {
     await fetch(`/api/scripts/${id}/loop`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ interval }),
     });
-    refresh();
+    await refresh();
   };
 
   const stats = {
