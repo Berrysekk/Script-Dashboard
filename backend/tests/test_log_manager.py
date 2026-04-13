@@ -32,10 +32,32 @@ async def test_prune_deletes_old_runs(tmp_path, monkeypatch):
         )
         await db.commit()
 
-    await prune_old_runs(retention_days=30)
-    assert not log_file.exists()
+    # Insert a recent run that should survive pruning
+    recent_date = date.today().isoformat()
+    recent_log_dir = tmp_path / "logs" / "s1" / recent_date
+    recent_log_dir.mkdir(parents=True)
+    recent_log_file = recent_log_dir / "r2.log"
+    recent_log_file.write_text("recent log")
 
+    async with db_module.get_db() as db:
+        await db.execute(
+            "INSERT INTO runs (id,script_id,started_at,log_path,status) VALUES (?,?,?,?,'success')",
+            ("r2", "s1", f"{recent_date} 12:00:00", f"s1/{recent_date}/r2.log"),
+        )
+        await db.commit()
+
+    await prune_old_runs(retention_days=30)
+
+    # Old run and its log file must be gone
+    assert not log_file.exists()
     async with db_module.get_db() as db:
         cur   = await db.execute("SELECT COUNT(*) FROM runs WHERE id='r1'")
         count = (await cur.fetchone())[0]
     assert count == 0
+
+    # Recent run must survive
+    assert recent_log_file.exists()
+    async with db_module.get_db() as db:
+        cur   = await db.execute("SELECT COUNT(*) FROM runs WHERE id='r2'")
+        count = (await cur.fetchone())[0]
+    assert count == 1
