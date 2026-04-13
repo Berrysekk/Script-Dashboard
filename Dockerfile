@@ -27,7 +27,7 @@ COPY backend/ backend/
 
 # Copy built Next.js artifacts from stage 1
 COPY --from=frontend-builder /app/frontend/.next          frontend/.next
-COPY --from=frontend-builder /app/frontend/public         frontend/public
+COPY --from=frontend-builder /app/frontend/public/.       frontend/public/
 COPY --from=frontend-builder /app/frontend/node_modules   frontend/node_modules
 COPY --from=frontend-builder /app/frontend/package.json   frontend/package.json
 COPY --from=frontend-builder /app/frontend/next.config.mjs frontend/next.config.mjs
