@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -73,6 +73,110 @@ function OutputSection({ scriptId }: { scriptId: string }) {
           </div>
         ))
       )}
+    </section>
+  );
+}
+
+// ── Code editor section ─────────────────────────────────────────────────────
+function CodeEditor({ scriptId }: { scriptId: string }) {
+  const [code, setCode]         = useState<string | null>(null);
+  const [saving, setSaving]     = useState(false);
+  const [saved, setSaved]       = useState(false);
+  const [error, setError]       = useState("");
+  const textareaRef             = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    fetch(`/api/scripts/${scriptId}/code`)
+      .then(r => r.json())
+      .then(d => setCode(d.code));
+  }, [scriptId]);
+
+  // Auto-resize textarea to fit content
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [code]);
+
+  const save = async () => {
+    if (code === null) return;
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}/code`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Ctrl/Cmd+S to save
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      save();
+    }
+    // Tab inserts spaces instead of changing focus
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end   = ta.selectionEnd;
+      const next  = code!.substring(0, start) + "    " + code!.substring(end);
+      setCode(next);
+      window.requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 4;
+      });
+    }
+  };
+
+  if (code === null) return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <p className="text-xs text-gray-400">Loading code…</p>
+    </section>
+  );
+
+  return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Code Editor</p>
+        <span className="text-[10px] text-gray-400">Ctrl+S / ⌘S to save · Tab inserts spaces</span>
+      </div>
+
+      <textarea
+        ref={textareaRef}
+        value={code}
+        onChange={e => setCode(e.target.value)}
+        onKeyDown={handleKeyDown}
+        spellCheck={false}
+        className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
+          rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
+          focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[200px]"
+        style={{ overflow: "hidden" }}
+      />
+
+      {error && (
+        <p className="mt-2 text-xs text-red-500">{error}</p>
+      )}
+
+      <div className="flex items-center gap-3 mt-3">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        {saved && <span className="text-xs text-green-500">✓ Saved</span>}
+      </div>
     </section>
   );
 }
@@ -217,7 +321,7 @@ export default function ScriptDetail() {
         </div>
       </div>
 
-      {/* Loop interval input (shown when Loop button clicked) */}
+      {/* Loop interval input */}
       {showLoopInput && !isActive && (
         <div className="flex gap-2 mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
           <input
@@ -250,7 +354,7 @@ export default function ScriptDetail() {
         </div>
       )}
 
-      {/* Edit section */}
+      {/* Edit metadata section */}
       <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Edit</p>
         <input
@@ -281,6 +385,9 @@ export default function ScriptDetail() {
           </button>
         </div>
       </section>
+
+      {/* Code editor */}
+      <CodeEditor scriptId={id} />
 
       {/* Output files */}
       <OutputSection scriptId={id} />
