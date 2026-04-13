@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Script-Dashboard</Name>
+  <Repository>ghcr.io/berrysekk/script-dashboard:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Project>https://github.com/Berrysekk/Script-Dashboard</Project>
+  <Overview>Self-hosted Python script management dashboard. Upload .py scripts, run them once or on a configurable loop, stream logs live in the browser, and browse output files — all in one Docker container.</Overview>
+  <Category>Tools: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:80]/</WebUI>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+
+  <!-- Port: Web UI -->
+  <Config
+    Name="Web UI Port"
+    Target="80"
+    Default="7080"
+    Mode="tcp"
+    Description="Port to access the dashboard in your browser."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">7080</Config>
+
+  <!-- Volume: persistent data (scripts, logs, SQLite DB) -->
+  <Config
+    Name="Data"
+    Target="/data"
+    Default="/mnt/user/appdata/script-dashboard"
+    Mode="rw"
+    Description="Persistent storage for uploaded scripts, run logs, and the SQLite database."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/script-dashboard</Config>
+</Container>
