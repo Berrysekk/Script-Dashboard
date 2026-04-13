@@ -19,6 +19,7 @@ type Props = {
 const statusColor: Record<string, string> = {
   running: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
   success: "bg-gray-100 text-gray-500 dark:bg-neutral-800 dark:text-gray-400",
+  warning: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400",
   error:   "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
   idle:    "bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-gray-500",
 };

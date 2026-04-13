@@ -196,38 +196,46 @@ async def list_output(script_id: str):
     if not output_dir.exists():
         return []
     files = []
-    for f in sorted(output_dir.iterdir()):
+    for f in sorted(output_dir.rglob("*")):
         if f.is_file():
             stat = f.stat()
             files.append({
-                "filename": f.name,
+                "filename": f.relative_to(output_dir).as_posix(),  # e.g. "subdir/file.rsc"
                 "size":     stat.st_size,
                 "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             })
     return files
 
 
-@router.get("/scripts/{script_id}/output/{filename}")
+@router.get("/scripts/{script_id}/output/{filename:path}")
 async def download_output(script_id: str, filename: str):
     from fastapi.responses import FileResponse
     output_dir = _db.SCRIPTS_DIR / script_id / "output"
     output_file = (output_dir / filename).resolve()
-    if not str(output_file).startswith(str(output_dir.resolve())):
+    if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
         raise HTTPException(400, "Invalid filename")
     if not output_file.exists() or not output_file.is_file():
         raise HTTPException(404, "Output file not found")
-    return FileResponse(output_file, filename=filename)
+    return FileResponse(output_file, filename=output_file.name)
 
 
-@router.delete("/scripts/{script_id}/output/{filename}")
+@router.delete("/scripts/{script_id}/output/{filename:path}")
 async def delete_output(script_id: str, filename: str):
     output_dir = _db.SCRIPTS_DIR / script_id / "output"
     output_file = (output_dir / filename).resolve()
-    if not str(output_file).startswith(str(output_dir.resolve())):
+    if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
         raise HTTPException(400, "Invalid filename")
     if not output_file.exists():
         raise HTTPException(404, "Output file not found")
     output_file.unlink()
+    # Remove empty parent dirs up to output_dir
+    for parent in output_file.parents:
+        if parent == output_dir:
+            break
+        try:
+            parent.rmdir()  # only succeeds if empty
+        except OSError:
+            break
     return {"ok": True}
 
 

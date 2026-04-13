@@ -17,9 +17,15 @@ const dur = (s: string, e?: string) => {
 };
 
 // ── Output files section ────────────────────────────────────────────────────
+/** Encode a posix path for use in a URL, preserving real slashes between segments */
+function encodeOutputPath(p: string) {
+  return p.split("/").map(encodeURIComponent).join("/");
+}
+
 function OutputSection({ scriptId }: { scriptId: string }) {
-  const [files, setFiles]     = useState<OutputFile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles]           = useState<OutputFile[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     fetch(`/api/scripts/${scriptId}/output`)
@@ -30,48 +36,99 @@ function OutputSection({ scriptId }: { scriptId: string }) {
   useEffect(() => { load(); }, [load]);
 
   const del = async (filename: string) => {
-    await fetch(`/api/scripts/${scriptId}/output/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    await fetch(`/api/scripts/${scriptId}/output/${encodeOutputPath(filename)}`, { method: "DELETE" });
     load();
   };
 
+  const toggleDir = (dir: string) =>
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      next.has(dir) ? next.delete(dir) : next.add(dir);
+      return next;
+    });
+
   if (loading) return null;
+
+  // Group files by their immediate parent directory ("" = root)
+  const groups: Record<string, OutputFile[]> = {};
+  for (const f of files) {
+    const parts = f.filename.split("/");
+    const dir   = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    (groups[dir] ??= []).push(f);
+  }
+  const dirs = Object.keys(groups).sort();
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Output Files</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          Output Files
+          {files.length > 0 && <span className="ml-2 font-normal text-gray-400">({files.length})</span>}
+        </p>
         <button onClick={load} className="text-[11px] text-gray-400 hover:text-gray-600">↻ Refresh</button>
       </div>
+
       {files.length === 0 ? (
         <p className="text-xs text-gray-400">
           No output files yet. Scripts write to{" "}
           <code className="bg-gray-100 dark:bg-neutral-800 px-1 rounded">$SCRIPT_OUTPUT_DIR</code>.
         </p>
       ) : (
-        files.map(f => (
-          <div key={f.filename} className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800 last:border-0">
-            <div>
-              <span className="text-xs font-mono">{f.filename}</span>
-              <span className="text-[10px] text-gray-400 ml-2">{(f.size / 1024).toFixed(1)} KB</span>
-              <span className="text-[10px] text-gray-400 ml-2">{new Date(f.modified).toLocaleString()}</span>
+        dirs.map(dir => {
+          const dirFiles  = groups[dir];
+          const isCollapsed = collapsed.has(dir);
+          const label     = dir || "📁 /";
+          return (
+            <div key={dir || "__root__"} className="mb-3 last:mb-0">
+              {/* Directory header — only shown for subdirectories */}
+              {dir && (
+                <button
+                  onClick={() => toggleDir(dir)}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400
+                    w-full text-left py-1 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  <span>{isCollapsed ? "▶" : "▼"}</span>
+                  <span className="font-mono">📁 {label}</span>
+                  <span className="text-gray-400 font-normal">({dirFiles.length})</span>
+                </button>
+              )}
+              {/* File rows */}
+              {!isCollapsed && dirFiles.map(f => {
+                const basename = f.filename.split("/").at(-1)!;
+                const url      = `/api/scripts/${scriptId}/output/${encodeOutputPath(f.filename)}`;
+                return (
+                  <div
+                    key={f.filename}
+                    className={`flex items-center justify-between py-1.5 border-b border-gray-100
+                      dark:border-neutral-800 last:border-0 ${dir ? "pl-4" : ""}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-mono truncate block">{basename}</span>
+                      <span className="text-[10px] text-gray-400">
+                        {(f.size / 1024).toFixed(1)} KB · {new Date(f.modified).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0 ml-3">
+                      <a
+                        href={url}
+                        download={basename}
+                        className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
+                      >
+                        ⬇
+                      </a>
+                      <button
+                        onClick={() => del(f.filename)}
+                        className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="flex gap-1.5">
-              <a
-                href={`/api/scripts/${scriptId}/output/${encodeURIComponent(f.filename)}`}
-                download
-                className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
-              >
-                ⬇
-              </a>
-              <button
-                onClick={() => del(f.filename)}
-                className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
     </section>
   );
@@ -522,7 +579,8 @@ export default function ScriptDetail() {
                     <div className="flex items-center gap-3">
                       <span className={`text-[10px] font-semibold px-1.5 rounded-full ${
                         r.status === "success" ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
-                          : r.status === "error" ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
+                          : r.status === "warning" ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+                          : r.status === "error"   ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
                           : "bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400"
                       }`}>
                         {r.exit_code != null ? `exit ${r.exit_code}` : r.status}

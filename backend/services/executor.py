@@ -113,7 +113,12 @@ async def _execute(
         await q.put(None)
     _ws_queues.pop(run_id, None)
 
-    status = "success" if exit_code == 0 else "error"
+    if exit_code == 0:
+        status = "success"
+    elif exit_code is not None and exit_code >= 128:
+        status = "error"    # killed by signal / hard crash
+    else:
+        status = "warning"  # script ran but reported failures (e.g. sys.exit(1))
     async with _db.get_db() as db:
         await db.execute(
             "UPDATE runs SET finished_at=datetime('now'), exit_code=?, status=? WHERE id=?",

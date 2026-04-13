@@ -88,7 +88,8 @@ export default function Dashboard() {
           >
             <span className={`w-1.5 h-1.5 rounded-full shrink-0
               ${s.loop_enabled || s.status === "running" ? "bg-green-400"
-                : s.status === "error" ? "bg-red-400"
+                : s.status === "error"   ? "bg-red-400"
+                : s.status === "warning" ? "bg-amber-400"
                 : "bg-gray-200 dark:bg-neutral-700"}`} />
             <span className="truncate">{s.name}</span>
           </Link>
