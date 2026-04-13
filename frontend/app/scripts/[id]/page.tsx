@@ -444,18 +444,40 @@ export default function ScriptDetail() {
     return acc;
   }, {}) ?? {};
 
-  if (!script) return <div className="p-8 text-sm text-gray-400">Loading…</div>;
+  if (!script) return (
+    <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+  );
 
   const isActive = script.status === "running" || script.loop_enabled;
 
-  return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-3xl mx-auto">
-      <Link href="/" className="text-xs text-gray-400 hover:underline mb-4 block">← Back to dashboard</Link>
+  const statusBadge = script.loop_enabled
+    ? { label: "● Looping", cls: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" }
+    : script.status === "running"
+    ? { label: "● Running",  cls: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" }
+    : script.status === "success"
+    ? { label: "✓ Success",  cls: "bg-gray-100 text-gray-500 dark:bg-neutral-800 dark:text-gray-400" }
+    : script.status === "warning"
+    ? { label: "⚠ Warning",  cls: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" }
+    : script.status === "error"
+    ? { label: "✕ Error",    cls: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" }
+    : { label: "Idle",       cls: "bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-gray-500" };
 
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-base font-semibold mb-0.5">{script.name}</h1>
-          <p className="text-xs text-gray-400 font-mono">{script.filename}</p>
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {/* Top bar */}
+      <div className="sticky top-0 z-10 bg-white dark:bg-neutral-900 border-b border-gray-200 dark:border-neutral-800 px-6 py-3 flex items-center gap-4">
+        <Link href="/" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-sm shrink-0">←</Link>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-sm font-semibold truncate">{script.name}</h1>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${statusBadge.cls}`}>
+              {statusBadge.label}
+            </span>
+            {isActive && script.loop_enabled && (
+              <span className="text-[10px] text-amber-500 dark:text-amber-400">🔁 every {script.loop_interval}</span>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">{script.filename}</p>
         </div>
 
         {/* Run controls */}
@@ -465,14 +487,14 @@ export default function ScriptDetail() {
               <button
                 disabled={busy}
                 onClick={run}
-                className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded font-medium disabled:opacity-50"
+                className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded font-medium disabled:opacity-50"
               >
                 {busy ? "…" : "▶ Run"}
               </button>
               <button
                 disabled={busy}
                 onClick={() => setShowLoopInput(v => !v)}
-                className="text-xs border border-gray-200 dark:border-neutral-700 px-3 py-1.5 rounded font-medium"
+                className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800 px-3 py-1.5 rounded font-medium"
               >
                 🔁 Loop
               </button>
@@ -481,7 +503,7 @@ export default function ScriptDetail() {
             <button
               disabled={busy}
               onClick={stop}
-              className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 px-3 py-1.5 rounded font-medium disabled:opacity-50"
+              className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-100 px-4 py-1.5 rounded font-medium disabled:opacity-50"
             >
               {busy ? "…" : "■ Stop"}
             </button>
@@ -489,147 +511,154 @@ export default function ScriptDetail() {
         </div>
       </div>
 
-      {/* Loop interval input */}
+      {/* Loop input banner */}
       {showLoopInput && !isActive && (
-        <div className="flex gap-2 mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+        <div className="mx-6 mt-4 flex gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
           <input
-            className="flex-1 text-xs border border-gray-300 dark:border-neutral-700 rounded px-2 py-1 bg-white dark:bg-neutral-900"
+            className="flex-1 text-xs border border-gray-300 dark:border-neutral-700 rounded px-2 py-1.5 bg-white dark:bg-neutral-900"
             value={loopInterval}
             onChange={e => setLoopInterval(e.target.value)}
             placeholder="e.g. 6h, 30m, 5s, 1d"
             autoFocus
           />
-          <button
-            disabled={busy}
-            onClick={startLoop}
-            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
-          >
+          <button disabled={busy} onClick={startLoop}
+            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
             Start loop
           </button>
-          <button onClick={() => setShowLoopInput(false)} className="text-xs text-gray-400">Cancel</button>
+          <button onClick={() => setShowLoopInput(false)} className="text-xs text-gray-400 px-2">Cancel</button>
         </div>
       )}
 
-      {isActive && script.loop_enabled && (
-        <p className="text-xs text-amber-500 dark:text-amber-400 mb-4">
-          🔁 Looping every {script.loop_interval} — click Stop to cancel
-        </p>
-      )}
-
       {error && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-500">
+        <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-500">
           {error}
         </div>
       )}
 
-      {/* Edit metadata section */}
-      <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Edit</p>
-        <input
-          className="w-full text-sm border border-gray-200 dark:border-neutral-700 rounded px-3 py-1.5 mb-2 bg-transparent"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="Name"
-        />
-        <input
-          className="w-full text-sm border border-gray-200 dark:border-neutral-700 rounded px-3 py-1.5 mb-3 bg-transparent"
-          value={desc}
-          onChange={e => setDesc(e.target.value)}
-          placeholder="Description"
-        />
-        <div className="flex gap-2">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-          <button
-            onClick={() => fetch(`/api/scripts/${id}/reinstall`, { method: "POST" })}
-            className="text-xs border border-gray-200 dark:border-neutral-700 px-3 py-1.5 rounded"
-          >
-            ♻ Reinstall deps
-          </button>
+      {/* Two-column body */}
+      <div className="p-6 grid grid-cols-[1fr_340px] gap-5 items-start">
+
+        {/* ── LEFT: code + requirements + output ── */}
+        <div className="min-w-0 space-y-4">
+          <CodeEditor scriptId={id} />
+          <RequirementsEditor scriptId={id} onReinstallStarted={fetchScript} />
+          <OutputSection scriptId={id} />
         </div>
-      </section>
 
-      {/* Code editor */}
-      <CodeEditor scriptId={id} />
+        {/* ── RIGHT: metadata + log history + danger ── */}
+        <div className="space-y-4">
 
-      {/* Requirements editor */}
-      <RequirementsEditor scriptId={id} onReinstallStarted={fetchScript} />
+          {/* Metadata */}
+          <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Details</p>
+            <label className="block text-[10px] text-gray-400 mb-1">Name</label>
+            <input
+              className="w-full text-sm border border-gray-200 dark:border-neutral-700 rounded px-3 py-1.5 mb-3 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Script name"
+            />
+            <label className="block text-[10px] text-gray-400 mb-1">Description</label>
+            <input
+              className="w-full text-sm border border-gray-200 dark:border-neutral-700 rounded px-3 py-1.5 mb-4 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400"
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
+              placeholder="Optional description"
+            />
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button
+                onClick={() => fetch(`/api/scripts/${id}/reinstall`, { method: "POST" })}
+                className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800 px-3 py-1.5 rounded"
+              >
+                ♻ Reinstall venv
+              </button>
+            </div>
+          </section>
 
-      {/* Output files */}
-      <OutputSection scriptId={id} />
-
-      {/* Log history */}
-      <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Log History</p>
-        {script.runs.length === 0 ? (
-          <p className="text-xs text-gray-400">No runs yet.</p>
-        ) : (
-          Object.entries(byDate)
-            .sort(([a], [b]) => b.localeCompare(a))
-            .map(([date, runs]) => (
-              <div key={date} className="mb-4 last:mb-0">
-                <p className="text-xs font-semibold text-gray-500 mb-2">{date}</p>
-                {runs.map(r => (
-                  <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <span className={`text-[10px] font-semibold px-1.5 rounded-full ${
-                        r.status === "success" ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
-                          : r.status === "warning" ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
-                          : r.status === "error"   ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
-                          : "bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400"
-                      }`}>
-                        {r.exit_code != null ? `exit ${r.exit_code}` : r.status}
-                      </span>
-                      <span className="text-xs font-mono text-gray-500">
-                        {new Date(r.started_at).toLocaleTimeString()}
-                      </span>
-                      <span className="text-xs text-gray-400">{dur(r.started_at, r.finished_at)}</span>
+          {/* Log history */}
+          <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
+              Run History
+              {script.runs.length > 0 && <span className="ml-2 font-normal">({script.runs.length})</span>}
+            </p>
+            {script.runs.length === 0 ? (
+              <p className="text-xs text-gray-400">No runs yet.</p>
+            ) : (
+              <div className="max-h-[420px] overflow-y-auto -mx-4 px-4">
+                {Object.entries(byDate)
+                  .sort(([a], [b]) => b.localeCompare(a))
+                  .map(([date, runs]) => (
+                    <div key={date} className="mb-3 last:mb-0">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">{date}</p>
+                      {runs.map(r => (
+                        <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800 last:border-0 gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
+                              r.status === "success" ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
+                                : r.status === "warning" ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"
+                                : r.status === "error"   ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
+                                : "bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400"
+                            }`}>
+                              {r.exit_code != null ? `exit ${r.exit_code}` : r.status}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-mono text-gray-500 truncate">
+                                {new Date(r.started_at).toLocaleTimeString()}
+                              </p>
+                              <p className="text-[10px] text-gray-400">{dur(r.started_at, r.finished_at)}</p>
+                            </div>
+                          </div>
+                          <a
+                            href={`/api/runs/${r.id}/log`}
+                            download
+                            className="text-[10px] border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded shrink-0 hover:bg-gray-50 dark:hover:bg-neutral-800"
+                          >
+                            ⬇ Log
+                          </a>
+                        </div>
+                      ))}
                     </div>
-                    <a
-                      href={`/api/runs/${r.id}/log`}
-                      download
-                      className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
-                    >
-                      ⬇ Log
-                    </a>
-                  </div>
-                ))}
+                  ))}
               </div>
-            ))
-        )}
-      </section>
+            )}
+          </section>
 
-      {/* Danger zone */}
-      <section className="border border-red-200 dark:border-red-900/40 rounded-lg p-4">
-        <p className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">Danger Zone</p>
-        {!confirm ? (
-          <button
-            onClick={() => setConfirm(true)}
-            className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 px-3 py-1.5 rounded"
-          >
-            Delete script &amp; all logs
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-red-400">Cannot be undone.</p>
-            <button
-              onClick={async () => {
-                await fetch(`/api/scripts/${id}`, { method: "DELETE" });
-                router.push("/");
-              }}
-              className="text-xs bg-red-500 text-white px-3 py-1.5 rounded"
-            >
-              Delete
-            </button>
-            <button onClick={() => setConfirm(false)} className="text-xs text-gray-400 px-2">Cancel</button>
-          </div>
-        )}
-      </section>
+          {/* Danger zone */}
+          <section className="border border-red-200 dark:border-red-900/40 rounded-lg p-4">
+            <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-3">Danger Zone</p>
+            {!confirm ? (
+              <button
+                onClick={() => setConfirm(true)}
+                className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-100 px-3 py-1.5 rounded"
+              >
+                Delete script &amp; all logs
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-red-400">Cannot be undone.</p>
+                <button
+                  onClick={async () => {
+                    await fetch(`/api/scripts/${id}`, { method: "DELETE" });
+                    router.push("/");
+                  }}
+                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded"
+                >
+                  Delete
+                </button>
+                <button onClick={() => setConfirm(false)} className="text-xs text-gray-400 px-2">Cancel</button>
+              </div>
+            )}
+          </section>
+
+        </div>
+      </div>
     </div>
   );
 }
