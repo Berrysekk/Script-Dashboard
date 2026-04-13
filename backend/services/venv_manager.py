@@ -27,6 +27,7 @@ async def create_venv(
 
     req_file = script_dir / "requirements.txt"
     if req_file.exists():
+        emit("=== Installing requirements ===\n")
         pip  = venv_dir / "bin" / "pip"
         proc = await asyncio.create_subprocess_exec(
             str(pip), "install", "-r", str(req_file),
@@ -35,4 +36,10 @@ async def create_venv(
         )
         async for line in proc.stdout:
             emit(line.decode())
-        await proc.wait()
+        rc = await proc.wait()
+        if rc != 0:
+            emit(f"=== pip install failed (exit {rc}) — script will likely fail ===\n")
+        else:
+            emit("=== Requirements installed successfully ===\n")
+    else:
+        emit("=== No requirements.txt found — add packages via the Requirements editor ===\n")
