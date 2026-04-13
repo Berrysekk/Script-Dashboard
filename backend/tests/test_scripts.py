@@ -59,3 +59,32 @@ async def test_delete_script(client):
     await client.delete(f"/api/scripts/{sid}")
     resp = await client.get(f"/api/scripts/{sid}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_output_list_empty(client):
+    upload = await client.post(
+        "/api/scripts",
+        files={"file": ("out.py", io.BytesIO(b"pass"), "text/plain")},
+        data={"name": "Out"},
+    )
+    sid = upload.json()["id"]
+    res = await client.get(f"/api/scripts/{sid}/output")
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+@pytest.mark.asyncio
+async def test_output_list_after_write(client):
+    import backend.db as db_module
+    upload = await client.post(
+        "/api/scripts",
+        files={"file": ("out2.py", io.BytesIO(b"pass"), "text/plain")},
+        data={"name": "Out2"},
+    )
+    sid = upload.json()["id"]
+    out_dir = db_module.SCRIPTS_DIR / sid / "output"
+    (out_dir / "result.csv").write_text("a,b,c")
+    res = await client.get(f"/api/scripts/{sid}/output")
+    assert len(res.json()) == 1
+    assert res.json()[0]["filename"] == "result.csv"
