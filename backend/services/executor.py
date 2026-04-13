@@ -47,3 +47,76 @@ def parse_interval(interval: str) -> int:
     if value <= 0:
         raise ValueError(f"Invalid interval: {interval}")
     return value * units[interval[-1]]
+
+
+async def run_script(script_id: str) -> str:
+    """Spawn script subprocess. Returns run_id immediately (fire-and-forget)."""
+    run_id = str(uuid.uuid4())
+    script_dir = _db.SCRIPTS_DIR / script_id
+    log_file_path = log_path_for_run(script_id, run_id, date.today())
+
+    async with _db.get_db() as db:
+        await db.execute(
+            "INSERT INTO runs (id, script_id, log_path, status) VALUES (?, ?, ?, 'running')",
+            (run_id, script_id,
+             str(log_file_path.relative_to(_db.LOGS_DIR))),
+        )
+        await db.commit()
+
+    asyncio.create_task(_execute(script_id, run_id, script_dir, log_file_path))
+    return run_id
+
+
+async def _broadcast(run_id: str, line: str) -> None:
+    """Push a log line to all WebSocket queues watching this run."""
+    for q in list(_ws_queues.get(run_id, [])):
+        await q.put(line)
+
+
+async def _execute(
+    script_id: str,
+    run_id: str,
+    script_dir: Path,
+    log_path: Path,
+) -> None:
+    """Run the script subprocess, stream output to log file + WebSocket queues."""
+    import os as _os
+    _ws_queues[run_id] = []
+
+    with open(log_path, "w", buffering=1) as lf:
+        def emit(line: str) -> None:
+            lf.write(line)
+            lf.flush()
+            asyncio.get_event_loop().create_task(_broadcast(run_id, line))
+
+        if not venv_exists(script_dir):
+            lf.write("=== Setting up virtual environment ===\n")
+            await create_venv(script_dir, emit)
+
+        run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(script_dir / "output")}
+        venv_python = script_dir / "venv" / "bin" / "python"
+        proc = await asyncio.create_subprocess_exec(
+            str(venv_python),
+            str(script_dir / "script.py"),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(script_dir),
+            env=run_env,
+        )
+        async for raw in proc.stdout:
+            emit(raw.decode())
+        await proc.wait()
+        exit_code = proc.returncode
+
+    # Signal end-of-stream to all WebSocket listeners
+    for q in list(_ws_queues.get(run_id, [])):
+        await q.put(None)
+    _ws_queues.pop(run_id, None)
+
+    status = "success" if exit_code == 0 else "error"
+    async with _db.get_db() as db:
+        await db.execute(
+            "UPDATE runs SET finished_at=datetime('now'), exit_code=?, status=? WHERE id=?",
+            (exit_code, status, run_id),
+        )
+        await db.commit()
