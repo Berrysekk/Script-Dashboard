@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  dashboard:
+    build: .
+    image: script-dashboard
+    container_name: script-dashboard
+    volumes:
+      - script_data:/data
+    networks:
+      br0_macvlan:
+        ipv4_address: 192.168.1.100   # ← change to your desired IP
+    restart: unless-stopped
+
+volumes:
+  script_data:
+
+networks:
+  br0_macvlan:
+    external: true
+    name: br0_macvlan
