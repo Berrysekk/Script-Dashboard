@@ -40,12 +40,22 @@ async def _assert_can_access(db, script_id: str, user) -> None:
 
     We deliberately return 404 (not 403) to avoid leaking which IDs exist.
     """
-    cur = await db.execute("SELECT owner_id FROM scripts WHERE id = ?", (script_id,))
+    cur = await db.execute("SELECT id, owner_id FROM scripts WHERE id = ?", (script_id,))
     row = await cur.fetchone()
     if not row:
         raise HTTPException(404, "Script not found")
-    if user["role"] != "admin" and row["owner_id"] != user["id"]:
-        raise HTTPException(404, "Script not found")
+    if user["role"] == "admin":
+        return
+    if row["owner_id"] == user["id"]:
+        return
+    # Check role-based access
+    cur2 = await db.execute(
+        "SELECT 1 FROM role_scripts WHERE role_name = ? AND script_id = ?",
+        (user["role"], script_id),
+    )
+    if await cur2.fetchone():
+        return
+    raise HTTPException(404, "Script not found")
 
 
 @router.post("/scripts")
@@ -118,8 +128,12 @@ async def list_scripts(user=Depends(current_user)):
             cur = await db.execute(base_sql + " ORDER BY s.created_at DESC")
         else:
             cur = await db.execute(
-                base_sql + " WHERE s.owner_id = ? ORDER BY s.created_at DESC",
-                (user["id"],),
+                base_sql + """
+                WHERE s.owner_id = ?
+                   OR s.id IN (SELECT script_id FROM role_scripts WHERE role_name = ?)
+                ORDER BY s.created_at DESC
+                """,
+                (user["id"], user["role"]),
             )
         rows = await cur.fetchall()
     return [_row_to_meta(r) for r in rows]

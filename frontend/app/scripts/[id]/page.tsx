@@ -209,7 +209,7 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                           download={basename}
                           className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
                         >
-                          ⬇
+                          DL
                         </a>
                         <button
                           onClick={() => del(f.filename)}
@@ -465,7 +465,6 @@ export default function ScriptDetail() {
   const [script, setScript]       = useState<Script | null>(null);
   const [name, setName]           = useState("");
   const [desc, setDesc]           = useState("");
-  const [loopInterval, setLoopInterval] = useState("");
   const [saving, setSaving]       = useState(false);
   const [busy, setBusy]           = useState(false);
   const [confirm, setConfirm]     = useState(false);
@@ -479,7 +478,6 @@ export default function ScriptDetail() {
         setScript(d);
         setName(d.name);
         setDesc(d.description ?? "");
-        setLoopInterval(d.loop_interval ?? "1h");
       });
   }, [id]);
 
@@ -530,13 +528,13 @@ export default function ScriptDetail() {
     } finally { setBusy(false); }
   };
 
-  const startLoop = async () => {
+  const startLoop = async (interval: string) => {
     setBusy(true); setError("");
     try {
       const res = await fetch(`/api/scripts/${id}/loop`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interval: loopInterval }),
+        body: JSON.stringify({ interval }),
       });
       if (!res.ok) throw new Error(await res.text());
       setShowLoopInput(false);
@@ -618,21 +616,20 @@ export default function ScriptDetail() {
         </div>
       </div>
 
-      {/* Loop input banner */}
+      {/* Loop interval presets */}
       {showLoopInput && !isActive && (
-        <div className="mx-6 mt-4 flex gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-          <input
-            className="flex-1 text-xs border border-gray-300 dark:border-neutral-700 rounded px-2 py-1.5 bg-white dark:bg-neutral-900"
-            value={loopInterval}
-            onChange={e => setLoopInterval(e.target.value)}
-            placeholder="e.g. 6h, 30m, 5s, 1d"
-            autoFocus
-          />
-          <button disabled={busy} onClick={startLoop}
-            className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
-            Start loop
-          </button>
-          <button onClick={() => setShowLoopInput(false)} className="text-xs text-gray-400 px-2">Cancel</button>
+        <div className="mx-6 mt-4 flex gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 flex-wrap">
+          {["5m", "15m", "30m", "1h", "6h", "1d"].map(interval => (
+            <button
+              key={interval}
+              disabled={busy}
+              onClick={() => startLoop(interval)}
+              className="text-xs border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-3 py-1.5 rounded disabled:opacity-50"
+            >
+              {interval}
+            </button>
+          ))}
+          <button onClick={() => setShowLoopInput(false)} className="text-xs text-gray-400 px-2 ml-auto">Cancel</button>
         </div>
       )}
 
@@ -727,7 +724,7 @@ export default function ScriptDetail() {
                             download
                             className="text-[10px] border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded shrink-0 hover:bg-gray-50 dark:hover:bg-neutral-800"
                           >
-                            ⬇ Log
+                            Log
                           </a>
                         </div>
                       ))}

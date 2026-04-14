@@ -113,8 +113,9 @@ async def purge_expired_sessions(db) -> None:
 # ── User CRUD ───────────────────────────────────────────────────────────────
 
 async def create_user(db, username: str, password: str, role: str = "user") -> str:
-    if role not in ("admin", "user"):
-        raise ValueError("role must be 'admin' or 'user'")
+    cur = await db.execute("SELECT 1 FROM roles WHERE name = ?", (role,))
+    if not await cur.fetchone():
+        raise ValueError(f"Role '{role}' does not exist")
     user_id = str(uuid.uuid4())
     await db.execute(
         "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
@@ -142,6 +143,54 @@ async def list_users(db):
 async def delete_user(db, user_id: str) -> None:
     await db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
     await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    await db.commit()
+
+
+# ── Role CRUD ──────────────────────────────────────────────────────────────
+
+async def list_roles(db):
+    cur = await db.execute("SELECT name FROM roles ORDER BY name")
+    roles = []
+    for row in await cur.fetchall():
+        name = row["name"]
+        cur2 = await db.execute(
+            "SELECT script_id FROM role_scripts WHERE role_name = ?", (name,)
+        )
+        script_ids = [r["script_id"] for r in await cur2.fetchall()]
+        roles.append({"name": name, "script_ids": script_ids})
+    return roles
+
+
+async def create_role(db, name: str, script_ids: list = None) -> str:
+    await db.execute("INSERT INTO roles (name) VALUES (?)", (name,))
+    for sid in (script_ids or []):
+        await db.execute(
+            "INSERT OR IGNORE INTO role_scripts (role_name, script_id) VALUES (?, ?)",
+            (name, sid),
+        )
+    await db.commit()
+    return name
+
+
+async def update_role_scripts(db, role_name: str, script_ids: list) -> None:
+    await db.execute("DELETE FROM role_scripts WHERE role_name = ?", (role_name,))
+    for sid in script_ids:
+        await db.execute(
+            "INSERT INTO role_scripts (role_name, script_id) VALUES (?, ?)",
+            (role_name, sid),
+        )
+    await db.commit()
+
+
+async def delete_role(db, role_name: str) -> None:
+    if role_name in ("admin", "user"):
+        raise ValueError("Cannot delete system roles")
+    cur = await db.execute("SELECT COUNT(*) FROM users WHERE role = ?", (role_name,))
+    count = (await cur.fetchone())[0]
+    if count > 0:
+        raise ValueError(f"Cannot delete role: {count} user(s) still assigned")
+    await db.execute("DELETE FROM role_scripts WHERE role_name = ?", (role_name,))
+    await db.execute("DELETE FROM roles WHERE name = ?", (role_name,))
     await db.commit()
 
 
