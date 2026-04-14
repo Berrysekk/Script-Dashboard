@@ -43,3 +43,32 @@ class CodeUpdateRequest(BaseModel):
 
 class RequirementsUpdateRequest(BaseModel):
     requirements: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class ResetPasswordRequest(BaseModel):
+    username: str
+    master_password: str
+    new_password: str
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    role: str
+    created_at: Optional[datetime] = None
