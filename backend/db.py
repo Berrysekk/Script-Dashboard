@@ -14,6 +14,7 @@ async def init_db() -> None:
   LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
   async with aiosqlite.connect(DB_PATH) as db:
+    db.row_factory = aiosqlite.Row
     await db.execute("""
       CREATE TABLE IF NOT EXISTS scripts (
         id           TEXT PRIMARY KEY,
@@ -37,7 +38,38 @@ async def init_db() -> None:
         FOREIGN KEY (script_id) REFERENCES scripts(id)
       )
     """)
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS users (
+        id            TEXT PRIMARY KEY,
+        username      TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role          TEXT NOT NULL DEFAULT 'user',
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    """)
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash  TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at  DATETIME NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    """)
+
+    # Add scripts.owner_id if it's missing (migration for pre-auth installs)
+    cur = await db.execute("PRAGMA table_info(scripts)")
+    cols = {row[1] for row in await cur.fetchall()}
+    if "owner_id" not in cols:
+      await db.execute("ALTER TABLE scripts ADD COLUMN owner_id TEXT")
+
     await db.commit()
+
+    # Bootstrap first admin + master-password file. Imported lazily to avoid a
+    # circular import (services.auth imports this module for DATA_DIR).
+    from backend.services import auth as auth_service
+    await auth_service.bootstrap_admin(db)
+    auth_service.bootstrap_master_password()
 
 
 @asynccontextmanager
