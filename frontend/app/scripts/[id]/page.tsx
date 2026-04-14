@@ -22,10 +22,63 @@ function encodeOutputPath(p: string) {
   return p.split("/").map(encodeURIComponent).join("/");
 }
 
+const TEXT_EXTS = new Set([
+  "txt","log","csv","json","xml","rsc","py","sh","js","ts","md",
+  "yaml","yml","toml","ini","cfg","conf","html","css","sql","env",
+]);
+const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","svg","webp","bmp","ico"]);
+
+function FilePreview({ scriptId, filename, onClose }: {
+  scriptId: string; filename: string; onClose: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  const isImage = IMAGE_EXTS.has(ext);
+  const isText = TEXT_EXTS.has(ext);
+  const url = `/api/scripts/${scriptId}/output/${encodeOutputPath(filename)}`;
+
+  useEffect(() => {
+    if (isText) {
+      fetch(url)
+        .then(r => r.text())
+        .then(t => { setContent(t); setLoading(false); });
+    } else {
+      setLoading(false);
+    }
+  }, [url, isText]);
+
+  return (
+    <div className="mt-1 mb-2 bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-neutral-700">
+        <span className="text-[11px] font-mono text-gray-500 truncate">{filename}</span>
+        <button onClick={onClose} className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          Close
+        </button>
+      </div>
+      <div className="p-3 max-h-[400px] overflow-auto">
+        {loading ? (
+          <p className="text-xs text-gray-400">Loading...</p>
+        ) : isImage ? (
+          <img src={url} alt={filename} className="max-w-full h-auto rounded" />
+        ) : isText && content !== null ? (
+          <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{content}</pre>
+        ) : (
+          <p className="text-xs text-gray-400">
+            Preview not available for .{ext} files.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OutputSection({ scriptId }: { scriptId: string }) {
   const [files, setFiles]           = useState<OutputFile[]>([]);
   const [loading, setLoading]       = useState(true);
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/scripts/${scriptId}/output`)
@@ -97,32 +150,48 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                 const basename = f.filename.split("/").at(-1)!;
                 const url      = `/api/scripts/${scriptId}/output/${encodeOutputPath(f.filename)}`;
                 return (
-                  <div
-                    key={f.filename}
-                    className={`flex items-center justify-between py-1.5 border-b border-gray-100
-                      dark:border-neutral-800 last:border-0 ${dir ? "pl-4" : ""}`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-mono truncate block">{basename}</span>
-                      <span className="text-[10px] text-gray-400">
-                        {(f.size / 1024).toFixed(1)} KB · {new Date(f.modified).toLocaleString()}
-                      </span>
+                  <div key={f.filename} className={`border-b border-gray-100 dark:border-neutral-800 last:border-0 ${dir ? "pl-4" : ""}`}>
+                    <div className="flex items-center justify-between py-1.5">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-mono truncate block">{basename}</span>
+                        <span className="text-[10px] text-gray-400">
+                          {(f.size / 1024).toFixed(1)} KB · {new Date(f.modified).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5 shrink-0 ml-3">
+                        <button
+                          onClick={() => setPreviewFile(previewFile === f.filename ? null : f.filename)}
+                          className={`text-xs border px-2 py-0.5 rounded ${
+                            previewFile === f.filename
+                              ? "bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-500"
+                              : "border-gray-200 dark:border-neutral-700 text-gray-400 hover:text-gray-600"
+                          }`}
+                          title="Preview"
+                        >
+                          Preview
+                        </button>
+                        <a
+                          href={url}
+                          download={basename}
+                          className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
+                        >
+                          ⬇
+                        </a>
+                        <button
+                          onClick={() => del(f.filename)}
+                          className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-1.5 shrink-0 ml-3">
-                      <a
-                        href={url}
-                        download={basename}
-                        className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
-                      >
-                        ⬇
-                      </a>
-                      <button
-                        onClick={() => del(f.filename)}
-                        className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded"
-                      >
-                        ✕
-                      </button>
-                    </div>
+                    {previewFile === f.filename && (
+                      <FilePreview
+                        scriptId={scriptId}
+                        filename={f.filename}
+                        onClose={() => setPreviewFile(null)}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -140,6 +209,7 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
   const [saving, setSaving]     = useState(false);
   const [saved, setSaved]       = useState(false);
   const [error, setError]       = useState("");
+  const [collapsed, setCollapsed] = useState(false);
   const textareaRef             = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -203,37 +273,47 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Code Editor</p>
-        <span className="text-[10px] text-gray-400">Ctrl+S / ⌘S to save · Tab inserts spaces</span>
-      </div>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="flex items-center justify-between w-full"
+      >
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+          <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
+          Code Editor
+        </p>
+        {!collapsed && <span className="text-[10px] text-gray-400">Ctrl+S / ⌘S to save · Tab inserts spaces</span>}
+      </button>
 
-      <textarea
-        ref={textareaRef}
-        value={code}
-        onChange={e => setCode(e.target.value)}
-        onKeyDown={handleKeyDown}
-        spellCheck={false}
-        className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
-          rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
-          focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[200px]"
-        style={{ overflow: "hidden" }}
-      />
+      {!collapsed && (
+        <>
+          <textarea
+            ref={textareaRef}
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            onKeyDown={handleKeyDown}
+            spellCheck={false}
+            className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
+              rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
+              focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[200px] mt-3"
+            style={{ overflow: "hidden" }}
+          />
 
-      {error && (
-        <p className="mt-2 text-xs text-red-500">{error}</p>
+          {error && (
+            <p className="mt-2 text-xs text-red-500">{error}</p>
+          )}
+
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+            {saved && <span className="text-xs text-green-500">✓ Saved</span>}
+          </div>
+        </>
       )}
-
-      <div className="flex items-center gap-3 mt-3">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="text-xs text-green-500">✓ Saved</span>}
-      </div>
     </section>
   );
 }
