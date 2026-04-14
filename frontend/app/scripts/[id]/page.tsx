@@ -209,7 +209,7 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
   const [saving, setSaving]     = useState(false);
   const [saved, setSaved]       = useState(false);
   const [error, setError]       = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const textareaRef             = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
