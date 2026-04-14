@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
 
 type Run    = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
 type Script = {
@@ -209,7 +210,7 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                           download={basename}
                           className="text-xs border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded"
                         >
-                          DL
+                          Download
                         </a>
                         <button
                           onClick={() => del(f.filename)}
@@ -238,30 +239,51 @@ function OutputSection({ scriptId }: { scriptId: string }) {
 }
 
 // ── Code editor section ─────────────────────────────────────────────────────
+// Lazy-load CodeMirror to avoid SSR issues
+import dynamic from "next/dynamic";
+const CodeMirrorEditor = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
+
 function CodeEditor({ scriptId }: { scriptId: string }) {
   const [code, setCode]         = useState<string | null>(null);
   const [saving, setSaving]     = useState(false);
   const [saved, setSaved]       = useState(false);
   const [error, setError]       = useState("");
   const [collapsed, setCollapsed] = useState(true);
-  const textareaRef             = useRef<HTMLTextAreaElement>(null);
+  const [extensions, setExtensions] = useState<any[]>([]);
+  const codeRef                 = useRef<string>("");
+  const saveRef                 = useRef<() => void>(() => {});
 
   useEffect(() => {
     fetch(`/api/scripts/${scriptId}/code`)
       .then(r => r.json())
-      .then(d => setCode(d.code));
+      .then(d => { setCode(d.code); codeRef.current = d.code; });
   }, [scriptId]);
 
-  // no-op: textarea uses fixed height with scroll
+  // Load CodeMirror extensions (python + Ctrl+S keymap) client-side only
+  useEffect(() => {
+    Promise.all([
+      import("@codemirror/lang-python"),
+      import("@codemirror/view"),
+    ]).then(([{ python }, { keymap }]) => {
+      setExtensions([
+        python(),
+        keymap.of([{
+          key: "Mod-s",
+          run: () => { saveRef.current(); return true; },
+        }]),
+      ]);
+    });
+  }, []);
 
   const save = async () => {
-    if (code === null) return;
+    const c = codeRef.current;
+    if (c === null) return;
     setSaving(true); setError(""); setSaved(false);
     try {
       const res = await fetch(`/api/scripts/${scriptId}/code`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: c }),
       });
       if (!res.ok) throw new Error(await res.text());
       setSaved(true);
@@ -273,29 +295,13 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
     }
   };
 
-  // Ctrl/Cmd+S to save
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-      e.preventDefault();
-      save();
-    }
-    // Tab inserts spaces instead of changing focus
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const ta = e.currentTarget;
-      const start = ta.selectionStart;
-      const end   = ta.selectionEnd;
-      const next  = code!.substring(0, start) + "    " + code!.substring(end);
-      setCode(next);
-      window.requestAnimationFrame(() => {
-        ta.selectionStart = ta.selectionEnd = start + 4;
-      });
-    }
-  };
+  saveRef.current = save;
+
+  const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
 
   if (code === null) return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <p className="text-xs text-gray-400">Loading code…</p>
+      <p className="text-xs text-gray-400">Loading code...</p>
     </section>
   );
 
@@ -309,22 +315,27 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
           <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
           Code Editor
         </p>
-        {!collapsed && <span className="text-[10px] text-gray-400">Ctrl+S / ⌘S to save · Tab inserts spaces</span>}
+        {!collapsed && <span className="text-[10px] text-gray-400">Ctrl+S / Cmd+S to save</span>}
       </button>
 
       {!collapsed && (
         <>
-          <textarea
-            ref={textareaRef}
-            value={code}
-            onChange={e => setCode(e.target.value)}
-            onKeyDown={handleKeyDown}
-            spellCheck={false}
-            className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
-              rounded px-3 py-2.5 resize-y leading-relaxed text-gray-800 dark:text-gray-200
-              focus:outline-none focus:ring-1 focus:ring-blue-400 h-[500px] mt-3"
-            style={{ overflow: "auto" }}
-          />
+          <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden">
+            <CodeMirrorEditor
+              value={code}
+              onChange={(val) => { setCode(val); codeRef.current = val; }}
+              extensions={extensions}
+              theme={isDark ? "dark" : "light"}
+              height="500px"
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: true,
+                bracketMatching: true,
+                indentOnInput: true,
+                tabSize: 4,
+              }}
+            />
+          </div>
 
           {error && (
             <p className="mt-2 text-xs text-red-500">{error}</p>
@@ -336,9 +347,9 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
               disabled={saving}
               className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? "Saving..." : "Save"}
             </button>
-            {saved && <span className="text-xs text-green-500">✓ Saved</span>}
+            {saved && <span className="text-xs text-green-500">Saved</span>}
           </div>
         </>
       )}
@@ -578,8 +589,8 @@ export default function ScriptDetail() {
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${statusBadge.cls}`}>
               {statusBadge.label}
             </span>
-            {isActive && script.loop_enabled && (
-              <span className="text-[10px] text-amber-500 dark:text-amber-400">🔁 every {script.loop_interval}</span>
+            {isActive && script.loop_enabled && script.loop_interval && (
+              <span className="text-[10px] text-amber-500 dark:text-amber-400">{formatLoopInterval(script.loop_interval)}</span>
             )}
           </div>
           <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">{script.filename}</p>
@@ -616,20 +627,14 @@ export default function ScriptDetail() {
         </div>
       </div>
 
-      {/* Loop interval presets */}
+      {/* Loop picker */}
       {showLoopInput && !isActive && (
-        <div className="mx-6 mt-4 flex gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 flex-wrap">
-          {["5m", "15m", "30m", "1h", "6h", "1d"].map(interval => (
-            <button
-              key={interval}
-              disabled={busy}
-              onClick={() => startLoop(interval)}
-              className="text-xs border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-3 py-1.5 rounded disabled:opacity-50"
-            >
-              {interval}
-            </button>
-          ))}
-          <button onClick={() => setShowLoopInput(false)} className="text-xs text-gray-400 px-2 ml-auto">Cancel</button>
+        <div className="mx-6 mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+          <LoopPicker
+            disabled={busy}
+            onSelect={(interval) => startLoop(interval)}
+            onCancel={() => setShowLoopInput(false)}
+          />
         </div>
       )}
 

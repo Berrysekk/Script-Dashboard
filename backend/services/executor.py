@@ -15,6 +15,9 @@ _loop_tasks: dict[str, asyncio.Task] = {}
 # script_id -> datetime of next scheduled run
 _next_run: dict[str, datetime] = {}
 
+# script_id -> active subprocess (for force-kill)
+_active_procs: dict[str, asyncio.subprocess.Process] = {}
+
 
 def parse_interval(interval: str) -> int:
     """
@@ -81,32 +84,54 @@ async def _execute(
 ) -> None:
     """Run the script subprocess, stream output to log file + WebSocket queues."""
     import os as _os
+    import logging
+    _log = logging.getLogger(__name__)
     _ws_queues[run_id] = []
+    loop = asyncio.get_running_loop()
+    exit_code = -1
 
-    with open(log_path, "w", buffering=1) as lf:
-        def emit(line: str) -> None:
-            lf.write(line)
-            lf.flush()
-            asyncio.get_event_loop().create_task(_broadcast(run_id, line))
+    try:
+        with open(log_path, "w", buffering=1) as lf:
+            def emit(line: str) -> None:
+                lf.write(line)
+                lf.flush()
+                loop.create_task(_broadcast(run_id, line))
 
-        if not venv_exists(script_dir):
-            lf.write("=== Setting up virtual environment ===\n")
-            await create_venv(script_dir, emit)
+            if not venv_exists(script_dir):
+                lf.write("=== Setting up virtual environment ===\n")
+                await create_venv(script_dir, emit)
 
-        run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(script_dir / "output")}
-        venv_python = script_dir / "venv" / "bin" / "python"
-        proc = await asyncio.create_subprocess_exec(
-            str(venv_python),
-            str(script_dir / "script.py"),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(script_dir),
-            env=run_env,
-        )
-        async for raw in proc.stdout:
-            emit(raw.decode())
-        await proc.wait()
-        exit_code = proc.returncode
+            run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(script_dir / "output")}
+            # Remove backend venv vars so the script uses its own venv
+            run_env.pop("VIRTUAL_ENV", None)
+            venv_python = script_dir / "venv" / "bin" / "python"
+            proc = await asyncio.create_subprocess_exec(
+                str(venv_python), "-u",
+                str(script_dir / "script.py"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(script_dir),
+                env=run_env,
+            )
+            _active_procs[script_id] = proc
+            try:
+                async for raw in proc.stdout:
+                    emit(raw.decode())
+                await proc.wait()
+            finally:
+                _active_procs.pop(script_id, None)
+            exit_code = proc.returncode
+
+    except Exception:
+        import traceback
+        _log.error("_execute failed for %s/%s:\n%s", script_id, run_id, traceback.format_exc())
+        # Write traceback to log file so the user sees it
+        try:
+            with open(log_path, "a") as lf:
+                lf.write(f"\n=== INTERNAL ERROR ===\n{traceback.format_exc()}")
+        except Exception:
+            pass
 
     # Signal end-of-stream to all WebSocket listeners
     for q in list(_ws_queues.get(run_id, [])):
@@ -116,9 +141,9 @@ async def _execute(
     if exit_code == 0:
         status = "success"
     elif exit_code is not None and exit_code >= 128:
-        status = "error"    # killed by signal / hard crash
+        status = "error"
     else:
-        status = "warning"  # script ran but reported failures (e.g. sys.exit(1))
+        status = "warning"
     async with _db.get_db() as db:
         await db.execute(
             "UPDATE runs SET finished_at=datetime('now'), exit_code=?, status=? WHERE id=?",
@@ -139,14 +164,68 @@ def is_looping(script_id: str) -> bool:
     return task is not None and not task.done()
 
 
+_DAY_MAP = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def parse_schedule(schedule_str: str) -> tuple[list[int], int, int]:
+    """Parse 'schedule:mon,wed,fri@06:00' -> ([0, 2, 4], 6, 0)."""
+    body = schedule_str[len("schedule:"):]
+    days_part, time_part = body.split("@")
+    days = sorted(_DAY_MAP[d.strip()] for d in days_part.split(","))
+    h, m = time_part.split(":")
+    return days, int(h), int(m)
+
+
+def _next_scheduled_time(days: list[int], hour: int, minute: int) -> datetime:
+    """Return the next datetime matching one of the given weekdays at hour:minute."""
+    now = datetime.now()
+    target_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if now.weekday() in days and target_today > now:
+        return target_today
+    for offset in range(1, 8):
+        candidate = now + timedelta(days=offset)
+        if candidate.weekday() in days:
+            return candidate.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    raise ValueError("No valid schedule days")
+
+
+async def _schedule_loop_worker(script_id: str, days: list[int], hour: int, minute: int) -> None:
+    """Run script_id at the scheduled day/time until cancelled."""
+    try:
+        while True:
+            next_time = _next_scheduled_time(days, hour, minute)
+            _next_run[script_id] = next_time
+            wait_seconds = (next_time - datetime.now()).total_seconds()
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            try:
+                await run_script(script_id)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error(
+                    "Scheduled run failed for %s: %s", script_id, exc
+                )
+            # Wait past the current minute to avoid re-triggering
+            await asyncio.sleep(61)
+    except asyncio.CancelledError:
+        _next_run.pop(script_id, None)
+        raise
+
+
 async def start_loop(script_id: str, interval: str) -> None:
     """Start a looping run task for script_id. No-op if already looping."""
     if is_looping(script_id):
         return
-    seconds = parse_interval(interval)
-    _loop_tasks[script_id] = asyncio.create_task(
-        _loop_worker(script_id, seconds)
-    )
+    if interval.startswith("schedule:"):
+        days, hour, minute = parse_schedule(interval)
+        _loop_tasks[script_id] = asyncio.create_task(
+            _schedule_loop_worker(script_id, days, hour, minute)
+        )
+    else:
+        seconds = parse_interval(interval)
+        _loop_tasks[script_id] = asyncio.create_task(
+            _loop_worker(script_id, seconds)
+        )
     async with _db.get_db() as db:
         await db.execute(
             "UPDATE scripts SET loop_enabled=1, loop_interval=? WHERE id=?",
@@ -164,6 +243,37 @@ async def stop_loop(script_id: str) -> None:
     async with _db.get_db() as db:
         await db.execute(
             "UPDATE scripts SET loop_enabled=0 WHERE id=?",
+            (script_id,),
+        )
+        await db.commit()
+
+
+async def force_stop(script_id: str) -> None:
+    """Kill any running subprocess for script_id and cancel its loop."""
+    # Kill the active subprocess (SIGKILL)
+    proc = _active_procs.pop(script_id, None)
+    if proc and proc.returncode is None:
+        try:
+            proc.kill()
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+
+    # Cancel loop task
+    task = _loop_tasks.pop(script_id, None)
+    if task and not task.done():
+        task.cancel()
+    _next_run.pop(script_id, None)
+
+    # Update DB
+    async with _db.get_db() as db:
+        await db.execute(
+            "UPDATE scripts SET loop_enabled=0 WHERE id=?",
+            (script_id,),
+        )
+        await db.execute(
+            "UPDATE runs SET finished_at=datetime('now'), exit_code=-9, status='error' "
+            "WHERE script_id=? AND status='running'",
             (script_id,),
         )
         await db.commit()
