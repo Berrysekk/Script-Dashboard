@@ -50,31 +50,60 @@ function FilePreview({ scriptId, filename, onClose }: {
     }
   }, [url, isText]);
 
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
-    <div className="mt-1 mb-2 bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700 rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-neutral-700">
-        <span className="text-[11px] font-mono text-gray-500 truncate">{filename}</span>
-        <button onClick={onClose} className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-          Close
-        </button>
-      </div>
-      {isHtml ? (
-        <iframe src={url} title={filename} className="w-full h-[600px] border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
-      ) : (
-        <div className="p-3 max-h-[400px] overflow-auto">
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="flex-1 flex flex-col m-4 bg-white dark:bg-neutral-900 rounded-xl overflow-hidden shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-neutral-700 shrink-0">
+          <span className="text-sm font-mono text-gray-600 dark:text-gray-300 truncate">{filename}</span>
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href={url}
+              download={filename.split("/").at(-1)}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded"
+            >
+              Download
+            </a>
+            <button
+              onClick={onClose}
+              className="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 font-medium px-2"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto">
           {loading ? (
-            <p className="text-xs text-gray-400">Loading...</p>
+            <div className="flex items-center justify-center h-full">
+              <p className="text-sm text-gray-400">Loading...</p>
+            </div>
+          ) : isHtml ? (
+            <iframe src={`${url}?inline=1`} title={filename} className="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
           ) : isImage ? (
-            <img src={url} alt={filename} className="max-w-full h-auto rounded" />
+            <div className="flex items-center justify-center h-full p-6 bg-neutral-100 dark:bg-neutral-950">
+              <img src={`${url}?inline=1`} alt={filename} className="max-w-full max-h-full object-contain rounded" />
+            </div>
           ) : isText && content !== null ? (
-            <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{content}</pre>
+            <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words p-5 leading-relaxed">{content}</pre>
           ) : (
-            <p className="text-xs text-gray-400">
-              Preview not available for .{ext} files.
-            </p>
+            <div className="flex items-center justify-center h-full">
+              <p className="text-sm text-gray-400">Preview not available for .{ext} files.</p>
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -454,7 +483,7 @@ export default function ScriptDetail() {
       });
   }, [id]);
 
-  useEffect(() => { fetchScript(); }, [fetchScript]);
+  useEffect(() => { setScript(null); fetchScript(); }, [fetchScript]);
 
   // Poll every 3s while a run is active
   useEffect(() => {
@@ -534,7 +563,7 @@ export default function ScriptDetail() {
     : script.status === "running"
     ? { label: "● Running",  cls: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" }
     : script.status === "success"
-    ? { label: "✓ Success",  cls: "bg-gray-100 text-gray-500 dark:bg-neutral-800 dark:text-gray-400" }
+    ? { label: "✓ Success",  cls: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" }
     : script.status === "warning"
     ? { label: "⚠ Warning",  cls: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" }
     : script.status === "error"
@@ -542,10 +571,9 @@ export default function ScriptDetail() {
     : { label: "Idle",       cls: "bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-gray-500" };
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div>
       {/* Top bar */}
       <div className="sticky top-0 z-10 bg-white dark:bg-neutral-900 border-b border-gray-200 dark:border-neutral-800 px-6 py-3 flex items-center gap-4">
-        <Link href="/" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-sm shrink-0">←</Link>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-sm font-semibold truncate">{script.name}</h1>
@@ -575,7 +603,7 @@ export default function ScriptDetail() {
                 onClick={() => setShowLoopInput(v => !v)}
                 className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800 px-3 py-1.5 rounded font-medium"
               >
-                🔁 Loop
+                Loop
               </button>
             </>
           ) : (
