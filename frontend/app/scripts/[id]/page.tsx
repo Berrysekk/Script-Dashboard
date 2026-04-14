@@ -259,14 +259,19 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
       .then(d => { setCode(d.code); codeRef.current = d.code; });
   }, [scriptId]);
 
-  // Load CodeMirror extensions (python + Ctrl+S keymap) client-side only
+  // Load CodeMirror extensions (python + Ctrl+S keymap + theme overrides) client-side only
   useEffect(() => {
     Promise.all([
       import("@codemirror/lang-python"),
       import("@codemirror/view"),
-    ]).then(([{ python }, { keymap }]) => {
+    ]).then(([{ python }, { keymap, EditorView }]) => {
+      const themeOverride = EditorView.theme({
+        "&": { backgroundColor: "transparent" },
+        ".cm-gutters": { backgroundColor: "transparent", borderRight: "1px solid var(--cm-gutter-border, #e5e7eb)" },
+      });
       setExtensions([
         python(),
+        themeOverride,
         keymap.of([{
           key: "Mod-s",
           run: () => { saveRef.current(); return true; },
@@ -320,7 +325,7 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
 
       {!collapsed && (
         <>
-          <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden">
+          <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-gray-50 dark:bg-neutral-950">
             <CodeMirrorEditor
               value={code}
               onChange={(val) => { setCode(val); codeRef.current = val; }}
@@ -437,7 +442,7 @@ function RequirementsEditor({ scriptId, onReinstallStarted }: {
         value={reqs}
         onChange={e => setReqs(e.target.value)}
         spellCheck={false}
-        placeholder={"requests\npandas>=2.0\nnumpy"}
+        placeholder="one package per line"
         className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
           rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
           focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[80px]"
@@ -674,21 +679,13 @@ export default function ScriptDetail() {
               onChange={e => setDesc(e.target.value)}
               placeholder="Optional description"
             />
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={save}
-                disabled={saving}
-                className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
-              <button
-                onClick={() => fetch(`/api/scripts/${id}/reinstall`, { method: "POST" })}
-                className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800 px-3 py-1.5 rounded"
-              >
-                ♻ Reinstall venv
-              </button>
-            </div>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
           </section>
 
           {/* Log history */}

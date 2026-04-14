@@ -53,7 +53,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <>
       {/* Topbar content via portal */}
       {mounted && document.getElementById("topbar") && createPortal(
-        <div className="flex items-center gap-5 w-full px-5">
+        <div className="flex items-center gap-5 w-full">
           <Stat label="Total" value={total} color="text-gray-600 dark:text-gray-300" />
           <Stat label="Running" value={running} color="text-blue-500 dark:text-blue-400" />
           <Stat label="Looping" value={looping} color="text-amber-500 dark:text-amber-400" />

@@ -11,6 +11,14 @@ const DAYS = [
   { key: "sat", label: "Sat" },
   { key: "sun", label: "Sun" },
 ];
+const MONTHS = [
+  { key: "jan", label: "Jan" }, { key: "feb", label: "Feb" },
+  { key: "mar", label: "Mar" }, { key: "apr", label: "Apr" },
+  { key: "may", label: "May" }, { key: "jun", label: "Jun" },
+  { key: "jul", label: "Jul" }, { key: "aug", label: "Aug" },
+  { key: "sep", label: "Sep" }, { key: "oct", label: "Oct" },
+  { key: "nov", label: "Nov" }, { key: "dec", label: "Dec" },
+];
 
 type Props = {
   disabled?: boolean;
@@ -34,12 +42,37 @@ export function formatLoopInterval(interval: string): string {
     if (dayKeys.length === 2 && weekends.every(d => dayKeys.includes(d))) return `Weekends at ${time}`;
     return `${dayKeys.map(d => dayLabels[d] || d).join(", ")} at ${time}`;
   }
+  if (interval.startsWith("monthly:")) {
+    const body = interval.slice("monthly:".length);
+    const [dayStr, time] = body.split("@");
+    return `${dayStr}${ordinal(parseInt(dayStr))} of month at ${time}`;
+  }
+  if (interval.startsWith("once:")) {
+    const body = interval.slice("once:".length);
+    const [datePart, time] = body.split("@");
+    return `${datePart} at ${time}`;
+  }
   return `every ${interval}`;
 }
 
+function ordinal(n: number): string {
+  if (n > 3 && n < 21) return "th";
+  switch (n % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+type Tab = "interval" | "weekly" | "monthly" | "once";
+
 export default function LoopPicker({ disabled, onSelect, onCancel }: Props) {
+  const [tab, setTab] = useState<Tab>("interval");
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
   const [time, setTime] = useState("06:00");
+  const [monthDay, setMonthDay] = useState("1");
+  const [onceDate, setOnceDate] = useState("");
 
   const toggleDay = (day: string) => {
     setSelectedDays(prev => {
@@ -49,17 +82,35 @@ export default function LoopPicker({ disabled, onSelect, onCancel }: Props) {
     });
   };
 
-  const startSchedule = () => {
-    if (selectedDays.size === 0) return;
-    const days = DAYS.filter(d => selectedDays.has(d.key)).map(d => d.key).join(",");
-    onSelect(`schedule:${days}@${time}`);
-  };
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "interval", label: "Interval" },
+    { key: "weekly", label: "Weekly" },
+    { key: "monthly", label: "Monthly" },
+    { key: "once", label: "Exact date" },
+  ];
 
   return (
     <div className="space-y-3">
-      {/* Quick intervals */}
-      <div>
-        <p className="text-[10px] text-gray-400 mb-1.5">Repeat every</p>
+      {/* Tab bar */}
+      <div className="flex gap-1">
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`text-[10px] px-2.5 py-1 rounded font-medium ${
+              tab === t.key
+                ? "bg-blue-500 text-white"
+                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+        <button onClick={onCancel} className="text-xs text-gray-400 px-2 ml-auto">Cancel</button>
+      </div>
+
+      {/* Interval presets */}
+      {tab === "interval" && (
         <div className="flex gap-1.5 flex-wrap">
           {INTERVAL_PRESETS.map(interval => (
             <button
@@ -72,46 +123,95 @@ export default function LoopPicker({ disabled, onSelect, onCancel }: Props) {
             </button>
           ))}
         </div>
-      </div>
+      )}
 
-      {/* Schedule picker */}
-      <div>
-        <p className="text-[10px] text-gray-400 mb-1.5">Schedule</p>
-        <div className="flex gap-1 flex-wrap mb-2">
-          {DAYS.map(d => (
+      {/* Weekly schedule */}
+      {tab === "weekly" && (
+        <div>
+          <div className="flex gap-1 flex-wrap mb-2">
+            {DAYS.map(d => (
+              <button
+                key={d.key}
+                disabled={disabled}
+                onClick={() => toggleDay(d.key)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  selectedDays.has(d.key)
+                    ? "bg-blue-500 text-white border-blue-500"
+                    : "border-gray-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-600"
+                } disabled:opacity-50`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-400">at</span>
+            <input
+              type="time" value={time} onChange={e => setTime(e.target.value)} disabled={disabled}
+              className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+            />
             <button
-              key={d.key}
-              disabled={disabled}
-              onClick={() => toggleDay(d.key)}
-              className={`text-xs px-2 py-1 rounded border transition-colors ${
-                selectedDays.has(d.key)
-                  ? "bg-blue-500 text-white border-blue-500"
-                  : "border-gray-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-600"
-              } disabled:opacity-50`}
+              disabled={disabled || selectedDays.size === 0}
+              onClick={() => {
+                const days = DAYS.filter(d => selectedDays.has(d.key)).map(d => d.key).join(",");
+                onSelect(`schedule:${days}@${time}`);
+              }}
+              className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded font-medium disabled:opacity-50"
             >
-              {d.label}
+              Start
             </button>
-          ))}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+      )}
+
+      {/* Monthly schedule */}
+      {tab === "monthly" && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-gray-400">Day</span>
+          <select
+            value={monthDay} onChange={e => setMonthDay(e.target.value)} disabled={disabled}
+            className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+          >
+            {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
           <span className="text-[10px] text-gray-400">at</span>
           <input
-            type="time"
-            value={time}
-            onChange={e => setTime(e.target.value)}
-            disabled={disabled}
+            type="time" value={time} onChange={e => setTime(e.target.value)} disabled={disabled}
             className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
           />
           <button
-            disabled={disabled || selectedDays.size === 0}
-            onClick={startSchedule}
+            disabled={disabled}
+            onClick={() => onSelect(`monthly:${monthDay}@${time}`)}
             className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded font-medium disabled:opacity-50"
           >
             Start
           </button>
-          <button onClick={onCancel} className="text-xs text-gray-400 px-2 ml-auto">Cancel</button>
         </div>
-      </div>
+      )}
+
+      {/* Exact date & time */}
+      {tab === "once" && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="date" value={onceDate} onChange={e => setOnceDate(e.target.value)} disabled={disabled}
+            className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+          />
+          <span className="text-[10px] text-gray-400">at</span>
+          <input
+            type="time" value={time} onChange={e => setTime(e.target.value)} disabled={disabled}
+            className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+          />
+          <button
+            disabled={disabled || !onceDate}
+            onClick={() => onSelect(`once:${onceDate}@${time}`)}
+            className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded font-medium disabled:opacity-50"
+          >
+            Start
+          </button>
+        </div>
+      )}
     </div>
   );
 }
