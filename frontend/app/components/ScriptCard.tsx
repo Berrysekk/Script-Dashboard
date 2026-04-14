@@ -24,9 +24,10 @@ const statusStyle: Record<string, { label: string; cls: string }> = {
   idle:    { label: "Idle",    cls: "bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-gray-500" },
 };
 
+const LOOP_PRESETS = ["5m", "15m", "30m", "1h", "6h", "1d"];
+
 export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Props) {
   const [showLoopInput, setShowLoopInput] = useState(false);
-  const [loopInterval, setLoopInterval]   = useState(script.loop_interval || "1h");
   const [busy, setBusy]                   = useState(false);
 
   const isActive = script.status === "running" || script.loop_enabled;
@@ -41,11 +42,11 @@ export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Pr
   };
 
   return (
-    <div className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-xl overflow-hidden flex flex-col">
+    <div className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-xl overflow-hidden flex flex-col hover:bg-gray-50 dark:hover:bg-neutral-800/50 transition-colors">
       {/* Clickable header */}
       <Link
         href={`/scripts/${script.id}`}
-        className="block px-4 pt-4 pb-3 hover:bg-gray-50 dark:hover:bg-neutral-800/50 transition-colors"
+        className="block px-4 pt-4 pb-3"
       >
         <div className="flex items-start justify-between gap-2 mb-1">
           <h3 className="font-semibold text-sm leading-snug">{script.name}</h3>
@@ -67,24 +68,20 @@ export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Pr
         </div>
       </Link>
 
-      {/* Loop interval input */}
+      {/* Loop interval presets */}
       {showLoopInput && (
-        <div className="flex gap-1 px-4 pb-3">
-          <input
-            className="flex-1 text-xs border border-gray-300 dark:border-neutral-700 rounded px-2 py-1 bg-transparent"
-            value={loopInterval}
-            onChange={(e) => setLoopInterval(e.target.value)}
-            placeholder="e.g. 6h, 30m, 5s"
-            autoFocus
-          />
-          <button
-            disabled={busy}
-            className="text-xs bg-blue-500 text-white px-2 py-1 rounded disabled:opacity-50"
-            onClick={() => act(async () => { await onLoop(script.id, loopInterval); setShowLoopInput(false); })}
-          >
-            Start
-          </button>
-          <button className="text-xs text-gray-400 px-1" onClick={() => setShowLoopInput(false)}>Cancel</button>
+        <div className="flex gap-1.5 px-4 pb-3 flex-wrap">
+          {LOOP_PRESETS.map(interval => (
+            <button
+              key={interval}
+              disabled={busy}
+              className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 px-2.5 py-1 rounded disabled:opacity-50"
+              onClick={() => act(async () => { await onLoop(script.id, interval); setShowLoopInput(false); })}
+            >
+              {interval}
+            </button>
+          ))}
+          <button className="text-xs text-gray-400 px-1 ml-auto" onClick={() => setShowLoopInput(false)}>Cancel</button>
         </div>
       )}
 

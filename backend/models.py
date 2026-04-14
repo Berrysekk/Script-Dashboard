@@ -67,6 +67,15 @@ class UserCreateRequest(BaseModel):
     role: str = "user"
 
 
+class RoleCreateRequest(BaseModel):
+    name: str
+    script_ids: list[str] = []
+
+
+class RoleUpdateRequest(BaseModel):
+    script_ids: list[str] = []
+
+
 class UserResponse(BaseModel):
     id: str
     username: str

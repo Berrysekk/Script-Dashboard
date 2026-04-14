@@ -57,6 +57,23 @@ async def init_db() -> None:
       )
     """)
 
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS roles (
+        name TEXT PRIMARY KEY
+      )
+    """)
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS role_scripts (
+        role_name TEXT NOT NULL,
+        script_id TEXT NOT NULL,
+        PRIMARY KEY (role_name, script_id),
+        FOREIGN KEY (role_name) REFERENCES roles(name) ON DELETE CASCADE,
+        FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+      )
+    """)
+    await db.execute("INSERT OR IGNORE INTO roles (name) VALUES ('admin')")
+    await db.execute("INSERT OR IGNORE INTO roles (name) VALUES ('user')")
+
     # Add scripts.owner_id if it's missing (migration for pre-auth installs)
     cur = await db.execute("PRAGMA table_info(scripts)")
     cols = {row[1] for row in await cur.fetchall()}

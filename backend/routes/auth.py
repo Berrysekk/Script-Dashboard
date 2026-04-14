@@ -7,6 +7,8 @@ from backend.models import (
     ChangePasswordRequest,
     LoginRequest,
     ResetPasswordRequest,
+    RoleCreateRequest,
+    RoleUpdateRequest,
     UserCreateRequest,
 )
 from backend.services import auth as auth_service
@@ -104,14 +106,52 @@ async def list_users(admin=Depends(require_admin)):
 
 @router.post("/auth/users")
 async def create_user(body: UserCreateRequest, admin=Depends(require_admin)):
-    if body.role not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="role must be 'admin' or 'user'")
     async with get_db() as db:
+        cur = await db.execute("SELECT 1 FROM roles WHERE name = ?", (body.role,))
+        if not await cur.fetchone():
+            raise HTTPException(status_code=400, detail=f"Role '{body.role}' does not exist")
         existing = await auth_service.get_user_by_username(db, body.username)
         if existing:
             raise HTTPException(status_code=409, detail="Username already exists")
         user_id = await auth_service.create_user(db, body.username, body.password, body.role)
     return {"id": user_id, "username": body.username, "role": body.role}
+
+
+# ── Role management ────────────────────────────────────────────────────────
+
+@router.get("/auth/roles")
+async def list_roles(admin=Depends(require_admin)):
+    async with get_db() as db:
+        return await auth_service.list_roles(db)
+
+
+@router.post("/auth/roles")
+async def create_role(body: RoleCreateRequest, admin=Depends(require_admin)):
+    async with get_db() as db:
+        try:
+            await auth_service.create_role(db, body.name, body.script_ids)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return {"name": body.name}
+
+
+@router.put("/auth/roles/{role_name}")
+async def update_role(role_name: str, body: RoleUpdateRequest, admin=Depends(require_admin)):
+    if role_name in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Cannot modify system roles")
+    async with get_db() as db:
+        await auth_service.update_role_scripts(db, role_name, body.script_ids)
+    return {"ok": True}
+
+
+@router.delete("/auth/roles/{role_name}")
+async def delete_role(role_name: str, admin=Depends(require_admin)):
+    async with get_db() as db:
+        try:
+            await auth_service.delete_role(db, role_name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
 
 
 @router.delete("/auth/users/{user_id}")
