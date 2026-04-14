@@ -1,10 +1,20 @@
 import asyncio
+import logging
+import os as _os
+import shutil as _shutil
 import uuid
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import backend.db as _db
 from backend.services.venv_manager import venv_exists, create_venv
 from backend.services.log_manager import log_path_for_run
+
+_log = logging.getLogger(__name__)
+
+# ── Firejail sandboxing ─────────────────────────────────────────────────────
+_FIREJAIL: str | None = _shutil.which("firejail")
+_SANDBOX_ENABLED: bool = _os.environ.get("SCRIPT_SANDBOX", "1") != "0"
+_firejail_warned: bool = False
 
 # run_id -> list[asyncio.Queue]  — one Queue per connected WebSocket client
 _ws_queues: dict[str, list[asyncio.Queue]] = {}
@@ -76,6 +86,35 @@ async def _broadcast(run_id: str, line: str) -> None:
         await q.put(line)
 
 
+def _build_exec_cmd(venv_python: Path, script_dir: Path) -> list[str]:
+    """Build the subprocess command, wrapping with firejail when available."""
+    global _firejail_warned
+
+    if _SANDBOX_ENABLED and _FIREJAIL:
+        return [
+            _FIREJAIL,
+            "--quiet",
+            "--noprofile",
+            f"--private={script_dir}",
+            "--read-only=.",
+            "--read-write=output",
+            "--noroot",
+            "--",
+            str(venv_python.relative_to(script_dir)),
+            "-u",
+            "script.py",
+        ]
+
+    if _SANDBOX_ENABLED and not _FIREJAIL and not _firejail_warned:
+        _log.warning(
+            "firejail not found — scripts will run UNSANDBOXED. "
+            "Install firejail or set SCRIPT_SANDBOX=0 to silence this warning."
+        )
+        _firejail_warned = True
+
+    return [str(venv_python), "-u", str(script_dir / "script.py")]
+
+
 async def _execute(
     script_id: str,
     run_id: str,
@@ -83,9 +122,6 @@ async def _execute(
     log_path: Path,
 ) -> None:
     """Run the script subprocess, stream output to log file + WebSocket queues."""
-    import os as _os
-    import logging
-    _log = logging.getLogger(__name__)
     _ws_queues[run_id] = []
     loop = asyncio.get_running_loop()
     exit_code = -1
@@ -101,17 +137,19 @@ async def _execute(
                 lf.write("=== Setting up virtual environment ===\n")
                 await create_venv(script_dir, emit)
 
-            run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(script_dir / "output")}
+            output_dir = script_dir / "output"
+            output_dir.mkdir(exist_ok=True)
+            run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(output_dir)}
             # Remove backend venv vars so the script uses its own venv
             run_env.pop("VIRTUAL_ENV", None)
             venv_python = script_dir / "venv" / "bin" / "python"
+            exec_cmd = _build_exec_cmd(venv_python, script_dir)
             proc = await asyncio.create_subprocess_exec(
-                str(venv_python), "-u",
-                str(script_dir / "script.py"),
+                *exec_cmd,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=str(script_dir),
+                cwd=str(output_dir),
                 env=run_env,
             )
             _active_procs[script_id] = proc
@@ -212,6 +250,92 @@ async def _schedule_loop_worker(script_id: str, days: list[int], hour: int, minu
         raise
 
 
+def parse_monthly(monthly_str: str) -> tuple[int, int, int]:
+    """Parse 'monthly:15@06:00' -> (15, 6, 0)."""
+    body = monthly_str[len("monthly:"):]
+    day_part, time_part = body.split("@")
+    h, m = time_part.split(":")
+    return int(day_part), int(h), int(m)
+
+
+def _next_monthly_time(day: int, hour: int, minute: int) -> datetime:
+    """Return next datetime matching the given day-of-month at hour:minute."""
+    now = datetime.now()
+    # Try this month
+    try:
+        target = now.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+        if target > now:
+            return target
+    except ValueError:
+        pass
+    # Next month
+    if now.month == 12:
+        next_month = now.replace(year=now.year + 1, month=1, day=1)
+    else:
+        next_month = now.replace(month=now.month + 1, day=1)
+    try:
+        return next_month.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+    except ValueError:
+        # Day doesn't exist in that month (e.g. 31st of Feb), skip to next
+        if next_month.month == 12:
+            next_month = next_month.replace(year=next_month.year + 1, month=1, day=1)
+        else:
+            next_month = next_month.replace(month=next_month.month + 1, day=1)
+        return next_month.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+
+
+async def _monthly_loop_worker(script_id: str, day: int, hour: int, minute: int) -> None:
+    """Run script_id on a specific day of each month until cancelled."""
+    try:
+        while True:
+            next_time = _next_monthly_time(day, hour, minute)
+            _next_run[script_id] = next_time
+            wait = (next_time - datetime.now()).total_seconds()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                await run_script(script_id)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error("Monthly run failed for %s: %s", script_id, exc)
+            await asyncio.sleep(61)
+    except asyncio.CancelledError:
+        _next_run.pop(script_id, None)
+        raise
+
+
+def parse_once(once_str: str) -> datetime:
+    """Parse 'once:2026-06-15@14:30' -> datetime."""
+    body = once_str[len("once:"):]
+    date_part, time_part = body.split("@")
+    h, m = time_part.split(":")
+    y, mo, d = date_part.split("-")
+    return datetime(int(y), int(mo), int(d), int(h), int(m))
+
+
+async def _once_worker(script_id: str, target: datetime) -> None:
+    """Run script_id once at a specific date/time, then disable loop."""
+    try:
+        wait = (target - datetime.now()).total_seconds()
+        if wait > 0:
+            _next_run[script_id] = target
+            await asyncio.sleep(wait)
+        try:
+            await run_script(script_id)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Once run failed for %s: %s", script_id, exc)
+    except asyncio.CancelledError:
+        _next_run.pop(script_id, None)
+        raise
+    finally:
+        _next_run.pop(script_id, None)
+        _loop_tasks.pop(script_id, None)
+        async with _db.get_db() as db:
+            await db.execute("UPDATE scripts SET loop_enabled=0 WHERE id=?", (script_id,))
+            await db.commit()
+
+
 async def start_loop(script_id: str, interval: str) -> None:
     """Start a looping run task for script_id. No-op if already looping."""
     if is_looping(script_id):
@@ -220,6 +344,16 @@ async def start_loop(script_id: str, interval: str) -> None:
         days, hour, minute = parse_schedule(interval)
         _loop_tasks[script_id] = asyncio.create_task(
             _schedule_loop_worker(script_id, days, hour, minute)
+        )
+    elif interval.startswith("monthly:"):
+        day, hour, minute = parse_monthly(interval)
+        _loop_tasks[script_id] = asyncio.create_task(
+            _monthly_loop_worker(script_id, day, hour, minute)
+        )
+    elif interval.startswith("once:"):
+        target = parse_once(interval)
+        _loop_tasks[script_id] = asyncio.create_task(
+            _once_worker(script_id, target)
         )
     else:
         seconds = parse_interval(interval)
