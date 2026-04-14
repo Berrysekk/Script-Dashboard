@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import LoopPicker, { formatLoopInterval } from "./LoopPicker";
 
 export type Script = {
   id: string; name: string; filename: string; description?: string;
@@ -23,8 +24,6 @@ const statusStyle: Record<string, { label: string; cls: string }> = {
   error:   { label: "Error",   cls: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" },
   idle:    { label: "Idle",    cls: "bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-gray-500" },
 };
-
-const LOOP_PRESETS = ["5m", "15m", "30m", "1h", "6h", "1d"];
 
 export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Props) {
   const [showLoopInput, setShowLoopInput] = useState(false);
@@ -59,7 +58,7 @@ export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Pr
         )}
         <div className="flex gap-3 mt-2 text-[10.5px] text-gray-400">
           {script.loop_enabled && script.loop_interval && (
-            <span>every {script.loop_interval}</span>
+            <span>{formatLoopInterval(script.loop_interval ?? "")}</span>
           )}
           {script.last_run_at && (
             <span>{new Date(script.last_run_at).toLocaleTimeString()}</span>
@@ -68,20 +67,14 @@ export default function ScriptCard({ script, onRun, onLoop, onStop, onLogs }: Pr
         </div>
       </Link>
 
-      {/* Loop interval presets */}
+      {/* Loop picker */}
       {showLoopInput && (
-        <div className="flex gap-1.5 px-4 pb-3 flex-wrap">
-          {LOOP_PRESETS.map(interval => (
-            <button
-              key={interval}
-              disabled={busy}
-              className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 px-2.5 py-1 rounded disabled:opacity-50"
-              onClick={() => act(async () => { await onLoop(script.id, interval); setShowLoopInput(false); })}
-            >
-              {interval}
-            </button>
-          ))}
-          <button className="text-xs text-gray-400 px-1 ml-auto" onClick={() => setShowLoopInput(false)}>Cancel</button>
+        <div className="px-4 pb-3">
+          <LoopPicker
+            disabled={busy}
+            onSelect={(interval) => act(async () => { await onLoop(script.id, interval); setShowLoopInput(false); })}
+            onCancel={() => setShowLoopInput(false)}
+          />
         </div>
       )}
 

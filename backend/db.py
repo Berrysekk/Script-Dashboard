@@ -1,8 +1,9 @@
+import os
 import aiosqlite
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-DATA_DIR = Path("/data")
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data")).resolve()
 DB_PATH = DATA_DIR / "script-database"
 SCRIPTS_DIR = DATA_DIR / "scripts"
 LOGS_DIR = DATA_DIR / "logs"

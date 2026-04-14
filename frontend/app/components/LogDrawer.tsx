@@ -5,7 +5,7 @@ type Run = { id: string; started_at: string; finished_at?: string; exit_code?: n
 type Props = { scriptId: string | null; scriptName: string; onClose: () => void; };
 
 function duration(start: string, end?: string) {
-  if (!end) return "running…";
+  if (!end) return "running...";
   const ms = new Date(end).getTime() - new Date(start).getTime();
   return ms < 60000 ? `${(ms/1000).toFixed(1)}s` : `${Math.floor(ms/60000)}m ${Math.floor((ms%60000)/1000)}s`;
 }
@@ -17,35 +17,57 @@ export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
   const [dates, setDates]             = useState<string[]>([]);
   const [activeDate, setActiveDate]   = useState("");
   const logRef                        = useRef<HTMLDivElement>(null);
-  const wsRef                         = useRef<WebSocket | null>(null);
+  const prevLenRef                    = useRef(0);
 
   useEffect(() => {
     if (!scriptId) return;
-    fetch(`/api/scripts/${scriptId}`).then(r => r.json()).then(data => {
-      const allRuns: Run[] = data.runs ?? [];
-      setRuns(allRuns);
-      const uniqDates = [...new Set(allRuns.map(r => r.started_at.slice(0,10)))].sort().reverse();
-      setDates(uniqDates);
-      if (uniqDates.length) setActiveDate(uniqDates[0]);
-      if (allRuns[0]) setSelected(allRuns[0]);
-    });
+    const load = () => {
+      fetch(`/api/scripts/${scriptId}`).then(r => r.json()).then(data => {
+        const allRuns: Run[] = data.runs ?? [];
+        setRuns(allRuns);
+        const uniqDates = [...new Set(allRuns.map(r => r.started_at.slice(0,10)))].sort().reverse();
+        setDates(uniqDates);
+        if (uniqDates.length) setActiveDate(prev => prev || uniqDates[0]);
+        setSelected(prev => {
+          if (prev) {
+            const updated = allRuns.find(r => r.id === prev.id);
+            return updated ?? prev;
+          }
+          return allRuns[0] ?? null;
+        });
+      });
+    };
+    load();
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
   }, [scriptId]);
 
   useEffect(() => {
     if (!selected) return;
     setLines([]);
-    wsRef.current?.close();
-    if (selected.status === "running") {
-      const ws = new WebSocket(`ws://${location.host}/ws/runs/${selected.id}`);
-      wsRef.current = ws;
-      ws.onmessage = (e) => {
-        setLines(p => [...p, e.data]);
-        requestAnimationFrame(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; });
-      };
-      return () => ws.close();
-    } else {
-      fetch(`/api/runs/${selected.id}/log`).then(r => r.text()).then(t => setLines(t.split("\n")));
-    }
+    prevLenRef.current = 0;
+
+    const fetchLog = () => {
+      fetch(`/api/runs/${selected.id}/log`)
+        .then(r => r.ok ? r.text() : "")
+        .then(t => {
+          if (!t) return;
+          const newLines = t.split("\n");
+          const grew = newLines.length > prevLenRef.current;
+          prevLenRef.current = newLines.length;
+          setLines(newLines);
+          if (grew) {
+            requestAnimationFrame(() => {
+              if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+            });
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchLog();
+    const id = setInterval(fetchLog, 1000);
+    return () => clearInterval(id);
   }, [selected?.id]);
 
   const runsForDate = runs.filter(r => r.started_at.startsWith(activeDate));
@@ -65,7 +87,7 @@ export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
           </div>
           {selected && (
             <a href={`/api/runs/${selected.id}/log`} download
-              className="text-xs border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded">⬇ Download</a>
+              className="text-xs border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded">Download</a>
           )}
           <button onClick={onClose} className="text-gray-400 text-sm ml-1">✕</button>
         </div>

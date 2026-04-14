@@ -216,7 +216,7 @@ async def stop_script(script_id: str, user=Depends(current_user)):
     from backend.services import executor
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
-    await executor.stop_loop(script_id)
+    await executor.force_stop(script_id)
     return {"ok": True}
 
 
