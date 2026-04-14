@@ -78,15 +78,10 @@ export default function UsersPage() {
   }
 
   return (
-    <main className="flex-1 overflow-y-auto p-5">
+    <div className="p-5">
       <div className="max-w-2xl">
         <div className="flex items-center justify-between mb-4">
-          <div>
-            <Link href="/" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs">
-              ← Dashboard
-            </Link>
-            <h1 className="text-sm font-semibold mt-1">Users</h1>
-          </div>
+          <h1 className="text-sm font-semibold">Users</h1>
         </div>
 
         <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
@@ -173,6 +168,6 @@ export default function UsersPage() {
           )}
         </section>
       </div>
-    </main>
+    </div>
   );
 }

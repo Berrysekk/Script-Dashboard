@@ -239,7 +239,7 @@ async def list_output(script_id: str, user=Depends(current_user)):
 
 
 @router.get("/scripts/{script_id}/output/{filename:path}")
-async def download_output(script_id: str, filename: str, user=Depends(current_user)):
+async def download_output(script_id: str, filename: str, inline: bool = False, user=Depends(current_user)):
     from fastapi.responses import FileResponse
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
@@ -249,6 +249,8 @@ async def download_output(script_id: str, filename: str, user=Depends(current_us
         raise HTTPException(400, "Invalid filename")
     if not output_file.exists() or not output_file.is_file():
         raise HTTPException(404, "Output file not found")
+    if inline:
+        return FileResponse(output_file)
     return FileResponse(output_file, filename=output_file.name)
 
 
