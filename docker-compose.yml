@@ -9,6 +9,12 @@ services:
       - "7080:80"          # access at http://<unraid-ip>:7080
     volumes:
       - /mnt/user/appdata/script-dashboard:/data
+    # Auth bootstrap — consumed only on first start. If you omit these, the
+    # passwords are auto-generated and printed to the container logs once.
+    # environment:
+    #   ADMIN_USERNAME: admin
+    #   ADMIN_PASSWORD: change-me
+    #   MASTER_PASSWORD: pick-something-long
     restart: unless-stopped
 
 # ── macvlan (own IP on br0) — uncomment to use instead ──────────────────────

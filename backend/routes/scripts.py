@@ -2,9 +2,10 @@ import uuid, json, zipfile, io, shutil
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
+from backend.deps import current_user
 from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest
 
 router = APIRouter()
@@ -20,10 +21,31 @@ def _row_to_meta(row) -> dict:
         "loop_enabled":  bool(row["loop_enabled"]),
         "loop_interval": row["loop_interval"],
         "created_at":    row["created_at"],
+        "owner_id":      row["owner_id"] if "owner_id" in keys else None,
         "status":        row["status"]       if "status"       in keys else None,
         "last_run_at":   row["last_run_at"]  if "last_run_at"  in keys else None,
         "run_count":     row["run_count"]    if "run_count"    in keys else 0,
     }
+
+
+def _can_see(user, row) -> bool:
+    """Admins see everything; regular users only see scripts they own."""
+    if user["role"] == "admin":
+        return True
+    return row["owner_id"] == user["id"]
+
+
+async def _assert_can_access(db, script_id: str, user) -> None:
+    """404 if the script doesn't exist *or* the user isn't allowed to touch it.
+
+    We deliberately return 404 (not 403) to avoid leaking which IDs exist.
+    """
+    cur = await db.execute("SELECT owner_id FROM scripts WHERE id = ?", (script_id,))
+    row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Script not found")
+    if user["role"] != "admin" and row["owner_id"] != user["id"]:
+        raise HTTPException(404, "Script not found")
 
 
 @router.post("/scripts")
@@ -31,6 +53,7 @@ async def upload_script(
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    user=Depends(current_user),
 ):
     script_id  = str(uuid.uuid4())
     script_dir  = _db.SCRIPTS_DIR / script_id
@@ -63,36 +86,49 @@ async def upload_script(
 
     async with get_db() as db:
         await db.execute(
-            "INSERT INTO scripts (id, name, filename, description) VALUES (?, ?, ?, ?)",
-            (script_id, display_name, filename, description),
+            "INSERT INTO scripts (id, name, filename, description, owner_id) VALUES (?, ?, ?, ?, ?)",
+            (script_id, display_name, filename, description, user["id"]),
         )
         await db.commit()
 
-    return {**meta, "status": "idle", "last_run_at": None, "run_count": 0}
+    return {
+        **meta,
+        "owner_id": user["id"],
+        "status": "idle",
+        "last_run_at": None,
+        "run_count": 0,
+    }
 
 
 @router.get("/scripts")
-async def list_scripts():
+async def list_scripts(user=Depends(current_user)):
+    base_sql = """
+        SELECT s.*,
+               r.status,
+               r.started_at AS last_run_at,
+               (SELECT COUNT(*) FROM runs WHERE script_id = s.id) AS run_count
+        FROM scripts s
+        LEFT JOIN runs r ON r.id = (
+            SELECT id FROM runs WHERE script_id = s.id
+            ORDER BY started_at DESC LIMIT 1
+        )
+    """
     async with get_db() as db:
-        cur = await db.execute("""
-            SELECT s.*,
-                   r.status,
-                   r.started_at AS last_run_at,
-                   (SELECT COUNT(*) FROM runs WHERE script_id = s.id) AS run_count
-            FROM scripts s
-            LEFT JOIN runs r ON r.id = (
-                SELECT id FROM runs WHERE script_id = s.id
-                ORDER BY started_at DESC LIMIT 1
+        if user["role"] == "admin":
+            cur = await db.execute(base_sql + " ORDER BY s.created_at DESC")
+        else:
+            cur = await db.execute(
+                base_sql + " WHERE s.owner_id = ? ORDER BY s.created_at DESC",
+                (user["id"],),
             )
-            ORDER BY s.created_at DESC
-        """)
         rows = await cur.fetchall()
     return [_row_to_meta(r) for r in rows]
 
 
 @router.get("/scripts/{script_id}")
-async def get_script(script_id: str):
+async def get_script(script_id: str, user=Depends(current_user)):
     async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
         cur = await db.execute("""
             SELECT s.*,
                    r.status,
@@ -106,23 +142,18 @@ async def get_script(script_id: str):
             WHERE s.id = ?
         """, (script_id,))
         row = await cur.fetchone()
-    if not row:
-        raise HTTPException(404, "Script not found")
-    async with get_db() as db:
         cur = await db.execute(
             "SELECT * FROM runs WHERE script_id = ? ORDER BY started_at DESC",
-            (script_id,)
+            (script_id,),
         )
         runs = [dict(r) for r in await cur.fetchall()]
     return {**_row_to_meta(row), "runs": runs}
 
 
 @router.patch("/scripts/{script_id}")
-async def patch_script(script_id: str, body: ScriptUpdateRequest):
+async def patch_script(script_id: str, body: ScriptUpdateRequest, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id = ?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
         if body.name is not None:
             await db.execute("UPDATE scripts SET name=? WHERE id=?", (body.name, script_id))
         if body.description is not None:
@@ -132,15 +163,13 @@ async def patch_script(script_id: str, body: ScriptUpdateRequest):
         if body.loop_enabled is not None:
             await db.execute("UPDATE scripts SET loop_enabled=? WHERE id=?", (int(body.loop_enabled), script_id))
         await db.commit()
-    return await get_script(script_id)
+    return await get_script(script_id, user)
 
 
 @router.delete("/scripts/{script_id}")
-async def delete_script(script_id: str):
+async def delete_script(script_id: str, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id = ?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
         await db.execute("DELETE FROM runs WHERE script_id = ?", (script_id,))
         await db.execute("DELETE FROM scripts WHERE id = ?", (script_id,))
         await db.commit()
@@ -151,37 +180,37 @@ async def delete_script(script_id: str):
 
 
 @router.post("/scripts/{script_id}/run")
-async def start_run(script_id: str):
+async def start_run(script_id: str, user=Depends(current_user)):
     from backend.services import executor
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     run_id = await executor.run_script(script_id)
     return {"run_id": run_id}
 
 
 @router.post("/scripts/{script_id}/loop")
-async def enable_loop(script_id: str, body: LoopRequest):
+async def enable_loop(script_id: str, body: LoopRequest, user=Depends(current_user)):
     from backend.services import executor
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     await executor.start_loop(script_id, body.interval)
     return {"ok": True, "interval": body.interval}
 
 
 @router.post("/scripts/{script_id}/stop")
-async def stop_script(script_id: str):
+async def stop_script(script_id: str, user=Depends(current_user)):
     from backend.services import executor
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
     await executor.stop_loop(script_id)
     return {"ok": True}
 
 
 @router.post("/scripts/{script_id}/reinstall")
-async def reinstall_deps(script_id: str):
+async def reinstall_deps(script_id: str, user=Depends(current_user)):
     from backend.services import executor
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
     script_dir = _db.SCRIPTS_DIR / script_id
     venv_dir   = script_dir / "venv"
     if venv_dir.exists():
@@ -191,7 +220,9 @@ async def reinstall_deps(script_id: str):
 
 
 @router.get("/scripts/{script_id}/output")
-async def list_output(script_id: str):
+async def list_output(script_id: str, user=Depends(current_user)):
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
     output_dir = _db.SCRIPTS_DIR / script_id / "output"
     if not output_dir.exists():
         return []
@@ -208,8 +239,10 @@ async def list_output(script_id: str):
 
 
 @router.get("/scripts/{script_id}/output/{filename:path}")
-async def download_output(script_id: str, filename: str):
+async def download_output(script_id: str, filename: str, user=Depends(current_user)):
     from fastapi.responses import FileResponse
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
     output_dir = _db.SCRIPTS_DIR / script_id / "output"
     output_file = (output_dir / filename).resolve()
     if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
@@ -220,7 +253,9 @@ async def download_output(script_id: str, filename: str):
 
 
 @router.delete("/scripts/{script_id}/output/{filename:path}")
-async def delete_output(script_id: str, filename: str):
+async def delete_output(script_id: str, filename: str, user=Depends(current_user)):
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
     output_dir = _db.SCRIPTS_DIR / script_id / "output"
     output_file = (output_dir / filename).resolve()
     if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
@@ -240,11 +275,9 @@ async def delete_output(script_id: str, filename: str):
 
 
 @router.get("/scripts/{script_id}/code")
-async def get_script_code(script_id: str):
+async def get_script_code(script_id: str, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     script_file = _db.SCRIPTS_DIR / script_id / "script.py"
     if not script_file.exists():
         raise HTTPException(404, "Script file not found")
@@ -252,32 +285,26 @@ async def get_script_code(script_id: str):
 
 
 @router.put("/scripts/{script_id}/code")
-async def update_script_code(script_id: str, body: CodeUpdateRequest):
+async def update_script_code(script_id: str, body: CodeUpdateRequest, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     script_file = _db.SCRIPTS_DIR / script_id / "script.py"
     script_file.write_text(body.code, encoding="utf-8")
     return {"ok": True}
 
 
 @router.get("/scripts/{script_id}/requirements")
-async def get_requirements(script_id: str):
+async def get_requirements(script_id: str, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
     return {"requirements": req_file.read_text(encoding="utf-8") if req_file.exists() else ""}
 
 
 @router.put("/scripts/{script_id}/requirements")
-async def update_requirements(script_id: str, body: RequirementsUpdateRequest):
+async def update_requirements(script_id: str, body: RequirementsUpdateRequest, user=Depends(current_user)):
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
     if body.requirements.strip():
         req_file.write_text(body.requirements, encoding="utf-8")
@@ -287,13 +314,11 @@ async def update_requirements(script_id: str, body: RequirementsUpdateRequest):
 
 
 @router.post("/scripts/{script_id}/requirements/reinstall")
-async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest):
+async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest, user=Depends(current_user)):
     """Write requirements.txt, delete venv, then trigger a fresh reinstall run."""
     from backend.services import executor
     async with get_db() as db:
-        cur = await db.execute("SELECT id FROM scripts WHERE id=?", (script_id,))
-        if not await cur.fetchone():
-            raise HTTPException(404, "Script not found")
+        await _assert_can_access(db, script_id, user)
     req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
     if body.requirements.strip():
         req_file.write_text(body.requirements, encoding="utf-8")

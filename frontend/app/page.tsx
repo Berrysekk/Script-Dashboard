@@ -5,6 +5,7 @@ import Link from "next/link";
 import ScriptCard, { Script } from "./components/ScriptCard";
 import UploadModal from "./components/UploadModal";
 import LogDrawer   from "./components/LogDrawer";
+import { useAuth } from "./components/AuthGate";
 
 type FilterView = "all" | "running" | "idle";
 
@@ -25,6 +26,7 @@ function SidebarItem({ label, active, dot, onClick }: {
 
 function TopBarStats({ total, running, looping }: { total: number; running: number; looping: number }) {
   const [mounted, setMounted] = useState(false);
+  const { user, logout } = useAuth();
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
   const el = document.getElementById("topbar");
@@ -37,6 +39,25 @@ function TopBarStats({ total, running, looping }: { total: number; running: numb
       <Stat label="Total" value={total}   color="text-gray-600 dark:text-gray-300" />
       <Stat label="Running" value={running} color="text-green-500 dark:text-green-400" />
       <Stat label="Looping" value={looping} color="text-amber-500 dark:text-amber-400" />
+      <div className="ml-auto flex items-center gap-3">
+        {user && (
+          <span className="text-[11px] text-gray-400">
+            {user.username}
+            <span className="ml-1 text-gray-300 dark:text-gray-600">({user.role})</span>
+          </span>
+        )}
+        {user?.role === "admin" && (
+          <Link href="/users" className="text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+            Users
+          </Link>
+        )}
+        <button
+          onClick={logout}
+          className="text-[11px] text-gray-400 hover:text-red-500"
+        >
+          Sign out
+        </button>
+      </div>
     </div>,
     el,
   );
