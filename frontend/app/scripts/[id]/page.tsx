@@ -36,7 +36,8 @@ function FilePreview({ scriptId, filename, onClose }: {
 
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const isImage = IMAGE_EXTS.has(ext);
-  const isText = TEXT_EXTS.has(ext);
+  const isHtml = ext === "html" || ext === "htm";
+  const isText = !isHtml && TEXT_EXTS.has(ext);
   const url = `/api/scripts/${scriptId}/output/${encodeOutputPath(filename)}`;
 
   useEffect(() => {
@@ -57,19 +58,23 @@ function FilePreview({ scriptId, filename, onClose }: {
           Close
         </button>
       </div>
-      <div className="p-3 max-h-[400px] overflow-auto">
-        {loading ? (
-          <p className="text-xs text-gray-400">Loading...</p>
-        ) : isImage ? (
-          <img src={url} alt={filename} className="max-w-full h-auto rounded" />
-        ) : isText && content !== null ? (
-          <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{content}</pre>
-        ) : (
-          <p className="text-xs text-gray-400">
-            Preview not available for .{ext} files.
-          </p>
-        )}
-      </div>
+      {isHtml ? (
+        <iframe src={url} title={filename} className="w-full h-[600px] border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
+      ) : (
+        <div className="p-3 max-h-[400px] overflow-auto">
+          {loading ? (
+            <p className="text-xs text-gray-400">Loading...</p>
+          ) : isImage ? (
+            <img src={url} alt={filename} className="max-w-full h-auto rounded" />
+          ) : isText && content !== null ? (
+            <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{content}</pre>
+          ) : (
+            <p className="text-xs text-gray-400">
+              Preview not available for .{ext} files.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -218,13 +223,7 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
       .then(d => setCode(d.code));
   }, [scriptId]);
 
-  // Auto-resize textarea to fit content
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
-  }, [code]);
+  // no-op: textarea uses fixed height with scroll
 
   const save = async () => {
     if (code === null) return;
@@ -293,9 +292,9 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
             onKeyDown={handleKeyDown}
             spellCheck={false}
             className="w-full font-mono text-xs bg-gray-50 dark:bg-neutral-950 border border-gray-200 dark:border-neutral-700
-              rounded px-3 py-2.5 resize-none leading-relaxed text-gray-800 dark:text-gray-200
-              focus:outline-none focus:ring-1 focus:ring-blue-400 min-h-[200px] mt-3"
-            style={{ overflow: "hidden" }}
+              rounded px-3 py-2.5 resize-y leading-relaxed text-gray-800 dark:text-gray-200
+              focus:outline-none focus:ring-1 focus:ring-blue-400 h-[500px] mt-3"
+            style={{ overflow: "auto" }}
           />
 
           {error && (
