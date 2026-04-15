@@ -18,6 +18,9 @@ Both bootstrap values are consumed only on first start (when the users table
 is empty / no master-password hash file exists). Subsequent starts ignore
 them; rotate via the UI or the CLI below.
 
+Command to grab passwords from logs:
+docker exec ScriptManager sh -c 'grep -i -E "password|admin|master" /var/log/fastapi.stdout.log /var/log/fastapi.stderr.log'
+
 ### User management
 
 Admins manage users at `/users` in the web UI.
