@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
+import LogDrawer from "../../components/LogDrawer";
+import { motion, AnimatePresence } from "motion/react";
 
 type Run    = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
 type Script = {
@@ -46,10 +48,10 @@ function FilePreview({ scriptId, filename, onClose }: {
       fetch(url)
         .then(r => r.text())
         .then(t => { setContent(t); setLoading(false); });
-    } else {
+    } else if (!isHtml) {
       setLoading(false);
     }
-  }, [url, isText]);
+  }, [url, isText, isHtml]);
 
   // Close on Escape
   useEffect(() => {
@@ -59,9 +61,24 @@ function FilePreview({ scriptId, filename, onClose }: {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.12 }}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    />
+    <motion.div
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ type: "spring", stiffness: 500, damping: 35 }}
+      className="fixed inset-0 z-50 flex flex-col pointer-events-none"
+    >
       <div
-        className="flex-1 flex flex-col m-4 bg-white dark:bg-neutral-900 rounded-xl overflow-hidden shadow-2xl"
+        className="flex-1 flex flex-col m-4 bg-white dark:bg-neutral-900 rounded-xl overflow-hidden shadow-2xl pointer-events-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -86,25 +103,19 @@ function FilePreview({ scriptId, filename, onClose }: {
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
+          {isHtml && (
+            <iframe
+              src={`${url}?inline=1`}
+              title={filename}
+              className={`w-full h-full border-0 bg-white ${loading ? "invisible" : ""}`}
+              sandbox="allow-scripts"
+              onLoad={() => setLoading(false)}
+            />
+          )}
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm text-gray-400">Loading...</p>
             </div>
-          ) : isHtml ? (
-            // SECURITY: user-generated HTML is rendered inside a sandboxed
-            // iframe WITHOUT `allow-same-origin`. Combining `allow-scripts`
-            // with `allow-same-origin` would let the document remove its own
-            // sandbox and execute in the dashboard's origin — a stored XSS
-            // primitive against any user who previews a file. The current
-            // attributes allow scripts to run (so dashboards can still
-            // preview interactive HTML reports) but deny access to cookies,
-            // localStorage, and same-origin fetch.
-            <iframe
-              src={`${url}?inline=1`}
-              title={filename}
-              className="w-full h-full border-0 bg-white"
-              sandbox="allow-scripts"
-            />
           ) : isImage ? (
             <div className="flex items-center justify-center h-full p-6 bg-neutral-100 dark:bg-neutral-950">
               <img src={`${url}?inline=1`} alt={filename} className="max-w-full max-h-full object-contain rounded" />
@@ -118,7 +129,8 @@ function FilePreview({ scriptId, filename, onClose }: {
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
+    </>
   );
 }
 
@@ -233,13 +245,15 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                         </button>
                       </div>
                     </div>
-                    {previewFile === f.filename && (
-                      <FilePreview
-                        scriptId={scriptId}
-                        filename={f.filename}
-                        onClose={() => setPreviewFile(null)}
-                      />
-                    )}
+                    <AnimatePresence>
+                      {previewFile === f.filename && (
+                        <FilePreview
+                          scriptId={scriptId}
+                          filename={f.filename}
+                          onClose={() => setPreviewFile(null)}
+                        />
+                      )}
+                    </AnimatePresence>
                   </div>
                 );
               })}
@@ -499,6 +513,7 @@ export default function ScriptDetail() {
   const [confirm, setConfirm]     = useState(false);
   const [showLoopInput, setShowLoopInput] = useState(false);
   const [error, setError]         = useState("");
+  const [logRunId, setLogRunId]   = useState<string | null>(null);
 
   const fetchScript = useCallback(() => {
     fetch(`/api/scripts/${id}`)
@@ -734,13 +749,21 @@ export default function ScriptDetail() {
                               <p className="text-[10px] text-gray-400">{dur(r.started_at, r.finished_at)}</p>
                             </div>
                           </div>
-                          <a
-                            href={`/api/runs/${r.id}/log`}
-                            download
-                            className="text-[10px] border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded shrink-0 hover:bg-gray-50 dark:hover:bg-neutral-800"
-                          >
-                            Log
-                          </a>
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => setLogRunId(r.id)}
+                              className="text-[10px] border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded hover:bg-gray-50 dark:hover:bg-neutral-800"
+                            >
+                              Preview
+                            </button>
+                            <a
+                              href={`/api/runs/${r.id}/log`}
+                              download
+                              className="text-[10px] border border-gray-200 dark:border-neutral-700 px-2 py-0.5 rounded hover:bg-gray-50 dark:hover:bg-neutral-800"
+                            >
+                              Log
+                            </a>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -765,6 +788,7 @@ export default function ScriptDetail() {
                 <button
                   onClick={async () => {
                     await fetch(`/api/scripts/${id}`, { method: "DELETE" });
+                    window.dispatchEvent(new Event("scripts-changed"));
                     router.push("/");
                   }}
                   className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded"
@@ -778,6 +802,17 @@ export default function ScriptDetail() {
 
         </div>
       </div>
+
+      <AnimatePresence>
+        {logRunId && (
+          <LogDrawer
+            scriptId={id}
+            scriptName={script.name}
+            initialRunId={logRunId}
+            onClose={() => setLogRunId(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

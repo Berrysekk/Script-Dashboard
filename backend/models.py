@@ -45,6 +45,10 @@ class RequirementsUpdateRequest(BaseModel):
     requirements: str
 
 
+class ReorderRequest(BaseModel):
+    script_ids: list[str]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

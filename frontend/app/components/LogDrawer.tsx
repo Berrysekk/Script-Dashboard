@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState, Fragment, type ReactNode } from "react";
+import { motion } from "motion/react";
 
 type Run = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
-type Props = { scriptId: string | null; scriptName: string; onClose: () => void; };
+type Props = { scriptId: string | null; scriptName: string; onClose: () => void; initialRunId?: string; };
 
 // Minimal ANSI SGR parser — covers the 8 standard + bright foreground colors,
 // bold, dim, and reset. Anything else is stripped. Enough for typical CLI output.
@@ -56,7 +57,7 @@ function duration(start: string, end?: string) {
   return ms < 60000 ? `${(ms/1000).toFixed(1)}s` : `${Math.floor(ms/60000)}m ${Math.floor((ms%60000)/1000)}s`;
 }
 
-export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
+export default function LogDrawer({ scriptId, scriptName, onClose, initialRunId }: Props) {
   const [runs, setRuns]               = useState<Run[]>([]);
   const [selected, setSelected]       = useState<Run | null>(null);
   const [lines, setLines]             = useState<string[]>([]);
@@ -78,6 +79,13 @@ export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
           if (prev) {
             const updated = allRuns.find(r => r.id === prev.id);
             return updated ?? prev;
+          }
+          if (initialRunId) {
+            const match = allRuns.find(r => r.id === initialRunId);
+            if (match) {
+              setActiveDate(match.started_at.slice(0, 10));
+              return match;
+            }
           }
           return allRuns[0] ?? null;
         });
@@ -120,60 +128,84 @@ export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
   if (!scriptId) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 h-[50vh] bg-white dark:bg-neutral-900 border-t border-gray-200 dark:border-neutral-800 flex flex-col shadow-2xl">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-neutral-800">
-        <span className="text-xs font-semibold">Logs — {scriptName}</span>
-        <div className="flex items-center gap-3">
-          <div className="flex">
-            {dates.slice(0,7).map(d => (
-              <button key={d} onClick={() => setActiveDate(d)}
-                className={`text-[11px] px-2.5 py-1 border border-gray-200 dark:border-neutral-700 -ml-px first:rounded-l last:rounded-r
-                  ${activeDate === d ? "bg-blue-500 text-white border-blue-500 z-10" : "text-gray-500"}`}>{d}</button>
+    <>
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.12 }}
+        className="fixed inset-0 z-30"
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ type: "spring", stiffness: 500, damping: 35 }}
+        className="fixed inset-x-0 bottom-0 z-40 h-[50vh] bg-white dark:bg-neutral-900 border-t border-gray-200 dark:border-neutral-800 flex flex-col shadow-2xl"
+      >
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 dark:border-neutral-800">
+          <span className="text-xs font-semibold">Logs — {scriptName}</span>
+          <div className="flex items-center gap-3">
+            <div className="flex">
+              {dates.slice(0,7).map(d => (
+                <button key={d} onClick={() => setActiveDate(d)}
+                  className={`text-[11px] px-2.5 py-1 border border-gray-200 dark:border-neutral-700 -ml-px first:rounded-l last:rounded-r transition-colors duration-150
+                    ${activeDate === d ? "bg-blue-500 text-white border-blue-500 z-10" : "text-gray-500"}`}>{d}</button>
+              ))}
+            </div>
+            {selected && (
+              <a href={`/api/runs/${selected.id}/log`} download
+                className="text-xs border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded">Download</a>
+            )}
+            <button onClick={onClose} className="text-gray-400 text-sm ml-1 hover:text-gray-600 transition-colors">✕</button>
+          </div>
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          <div className="w-52 border-r border-gray-200 dark:border-neutral-800 overflow-y-auto">
+            {runsForDate.map(r => (
+              <motion.button
+                key={r.id}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.15 }}
+                onClick={() => setSelected(r)}
+                className={`w-full text-left px-3 py-2 border-b border-gray-100 dark:border-neutral-800 transition-colors duration-150
+                  ${selected?.id === r.id ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-neutral-800"}`}
+              >
+                <p className="text-[11px] font-mono">{new Date(r.started_at).toLocaleTimeString()}</p>
+                <div className="flex gap-1.5 mt-0.5">
+                  <span className={`text-[10px] font-semibold px-1.5 rounded-full
+                    ${r.status==="success" ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
+                      : r.status==="error" ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
+                      : "bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400"}`}>
+                    {r.exit_code != null ? `exit ${r.exit_code}` : r.status}
+                  </span>
+                  <span className="text-[10px] text-gray-400">{duration(r.started_at, r.finished_at)}</span>
+                </div>
+              </motion.button>
             ))}
           </div>
-          {selected && (
-            <a href={`/api/runs/${selected.id}/log`} download
-              className="text-xs border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded">Download</a>
-          )}
-          <button onClick={onClose} className="text-gray-400 text-sm ml-1">✕</button>
+          <div ref={logRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11.5px] leading-relaxed text-gray-500 dark:text-gray-400 whitespace-pre-wrap">
+            {lines.map((line, i) => {
+              const hasAnsi = line.includes("\x1b[");
+              const fallback = !hasAnsi && (
+                /error|exception|traceback/i.test(line) ? "text-red-500 dark:text-red-400"
+                  : /warn/i.test(line)                 ? "text-amber-500 dark:text-amber-400"
+                  : /✓|success/i.test(line)            ? "text-green-600 dark:text-green-400"
+                  : ""
+              );
+              return (
+                <div key={i} className={fallback || ""}>
+                  {line ? renderAnsi(line) : "\u00a0"}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-52 border-r border-gray-200 dark:border-neutral-800 overflow-y-auto">
-          {runsForDate.map(r => (
-            <button key={r.id} onClick={() => setSelected(r)}
-              className={`w-full text-left px-3 py-2 border-b border-gray-100 dark:border-neutral-800
-                ${selected?.id === r.id ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-neutral-800"}`}>
-              <p className="text-[11px] font-mono">{new Date(r.started_at).toLocaleTimeString()}</p>
-              <div className="flex gap-1.5 mt-0.5">
-                <span className={`text-[10px] font-semibold px-1.5 rounded-full
-                  ${r.status==="success" ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
-                    : r.status==="error" ? "bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400"
-                    : "bg-blue-100 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400"}`}>
-                  {r.exit_code != null ? `exit ${r.exit_code}` : r.status}
-                </span>
-                <span className="text-[10px] text-gray-400">{duration(r.started_at, r.finished_at)}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-        <div ref={logRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11.5px] leading-relaxed text-gray-500 dark:text-gray-400 whitespace-pre-wrap">
-          {lines.map((line, i) => {
-            const hasAnsi = line.includes("\x1b[");
-            const fallback = !hasAnsi && (
-              /error|exception|traceback/i.test(line) ? "text-red-500 dark:text-red-400"
-                : /warn/i.test(line)                 ? "text-amber-500 dark:text-amber-400"
-                : /✓|success/i.test(line)            ? "text-green-600 dark:text-green-400"
-                : ""
-            );
-            return (
-              <div key={i} className={fallback || ""}>
-                {line ? renderAnsi(line) : "\u00a0"}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+      </motion.div>
+    </>
   );
 }

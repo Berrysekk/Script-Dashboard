@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
 from backend.deps import current_user
-from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, ReorderRequest
 
 router = APIRouter()
 
@@ -58,6 +58,7 @@ def _row_to_meta(row) -> dict:
         "status":        row["status"]       if "status"       in keys else None,
         "last_run_at":   row["last_run_at"]  if "last_run_at"  in keys else None,
         "run_count":     row["run_count"]    if "run_count"    in keys else 0,
+        "position":      row["position"]     if "position"     in keys else 0,
     }
 
 
@@ -192,13 +193,13 @@ async def list_scripts(user=Depends(current_user)):
     """
     async with get_db() as db:
         if user["role"] == "admin":
-            cur = await db.execute(base_sql + " ORDER BY s.created_at DESC")
+            cur = await db.execute(base_sql + " ORDER BY s.position ASC, s.created_at DESC")
         else:
             cur = await db.execute(
                 base_sql + """
                 WHERE s.owner_id = ?
                    OR s.id IN (SELECT script_id FROM role_scripts WHERE role_name = ?)
-                ORDER BY s.created_at DESC
+                ORDER BY s.position ASC, s.created_at DESC
                 """,
                 (user["id"], user["role"]),
             )
@@ -258,6 +259,18 @@ async def delete_script(script_id: str, user=Depends(current_user)):
     script_dir = _db.SCRIPTS_DIR / script_id
     if script_dir.exists():
         shutil.rmtree(script_dir)
+    return {"ok": True}
+
+
+@router.put("/scripts/reorder")
+async def reorder_scripts(body: ReorderRequest, user=Depends(current_user)):
+    async with get_db() as db:
+        for idx, script_id in enumerate(body.script_ids):
+            await db.execute(
+                "UPDATE scripts SET position = ? WHERE id = ?",
+                (idx, script_id),
+            )
+        await db.commit()
     return {"ok": True}
 
 
