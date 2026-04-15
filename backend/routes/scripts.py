@@ -1,3 +1,4 @@
+import os
 import uuid, json, zipfile, io, shutil
 from pathlib import Path
 from datetime import datetime, timezone
@@ -9,6 +10,38 @@ from backend.deps import current_user
 from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest
 
 router = APIRouter()
+
+# ── Upload / input limits ──────────────────────────────────────────────────
+# Cap at 50 MiB by default; override with SCRIPT_MAX_UPLOAD_BYTES. These caps
+# are the last line of defence against a logged-in user exhausting the disk.
+MAX_UPLOAD_BYTES = int(os.environ.get("SCRIPT_MAX_UPLOAD_BYTES", 50 * 1024 * 1024))
+MAX_NAME_LEN = 255
+MAX_DESCRIPTION_LEN = 10_000
+MAX_CODE_BYTES = 2 * 1024 * 1024  # 2 MiB of editable source is plenty
+MAX_REQUIREMENTS_BYTES = 64 * 1024
+# Zip-bomb guard: refuse archives whose decompressed py file exceeds this.
+MAX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
+
+
+def _validate_metadata(name: Optional[str], description: Optional[str]) -> None:
+    if name is not None and len(name) > MAX_NAME_LEN:
+        raise HTTPException(400, f"Name exceeds {MAX_NAME_LEN} characters")
+    if description is not None and len(description) > MAX_DESCRIPTION_LEN:
+        raise HTTPException(400, f"Description exceeds {MAX_DESCRIPTION_LEN} characters")
+
+
+def _safe_zip_name(name: str) -> bool:
+    """Return True if a zip entry name is safe to reference.
+
+    Rejects absolute paths, parent-traversal, NUL bytes, and backslashes (which
+    some archivers emit and some extractors treat as separators).
+    """
+    if not name or "\x00" in name or "\\" in name:
+        return False
+    if name.startswith("/"):
+        return False
+    parts = name.split("/")
+    return ".." not in parts
 
 
 def _row_to_meta(row) -> dict:
@@ -65,23 +98,57 @@ async def upload_script(
     description: Optional[str] = Form(None),
     user=Depends(current_user),
 ):
+    _validate_metadata(name, description)
+
+    # Stream the upload in chunks so an attacker can't exhaust memory by
+    # sending a 10 GB body — we reject as soon as the cap is exceeded.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"Upload exceeds {MAX_UPLOAD_BYTES} bytes")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+
     script_id  = str(uuid.uuid4())
     script_dir  = _db.SCRIPTS_DIR / script_id
     script_dir.mkdir(parents=True, exist_ok=True)
     (script_dir / "output").mkdir(exist_ok=True)
 
-    content  = await file.read()
     filename = file.filename or "script.py"
 
     if filename.endswith(".zip"):
-        with zipfile.ZipFile(io.BytesIO(content)) as zf:
-            py_files = [n for n in zf.namelist() if n.endswith(".py")]
-            if not py_files:
-                raise HTTPException(400, "zip must contain a .py file")
-            data = zf.read(py_files[0])
-            (script_dir / "script.py").write_bytes(data)
-            if "requirements.txt" in zf.namelist():
-                (script_dir / "requirements.txt").write_bytes(zf.read("requirements.txt"))
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                names = zf.namelist()
+                # Reject traversal / absolute paths in zip entries.
+                if not all(_safe_zip_name(n) for n in names):
+                    raise HTTPException(400, "zip contains unsafe entry names")
+                py_files = [n for n in names if n.endswith(".py")]
+                if not py_files:
+                    raise HTTPException(400, "zip must contain a .py file")
+                # Zip-bomb guard based on declared uncompressed size.
+                info = zf.getinfo(py_files[0])
+                if info.file_size > MAX_UNCOMPRESSED_BYTES:
+                    raise HTTPException(400, "zip entry too large")
+                data = zf.read(py_files[0])
+                if len(data) > MAX_UNCOMPRESSED_BYTES:
+                    raise HTTPException(400, "zip entry too large")
+                (script_dir / "script.py").write_bytes(data)
+                if "requirements.txt" in names:
+                    req_info = zf.getinfo("requirements.txt")
+                    if req_info.file_size > MAX_REQUIREMENTS_BYTES:
+                        raise HTTPException(400, "requirements.txt too large")
+                    (script_dir / "requirements.txt").write_bytes(
+                        zf.read("requirements.txt")
+                    )
+        except zipfile.BadZipFile:
+            shutil.rmtree(script_dir, ignore_errors=True)
+            raise HTTPException(400, "Invalid zip file")
         filename = Path(py_files[0]).name
     else:
         (script_dir / "script.py").write_bytes(content)
@@ -166,6 +233,7 @@ async def get_script(script_id: str, user=Depends(current_user)):
 
 @router.patch("/scripts/{script_id}")
 async def patch_script(script_id: str, body: ScriptUpdateRequest, user=Depends(current_user)):
+    _validate_metadata(body.name, body.description)
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
         if body.name is not None:
@@ -252,15 +320,42 @@ async def list_output(script_id: str, user=Depends(current_user)):
     return files
 
 
+def _resolve_output_path(script_id: str, filename: str) -> Path:
+    """Resolve ``filename`` under the script's output dir, rejecting traversal
+    and symlinks.
+
+    Rejecting symlinks — both on the final component and on any parent
+    directory — closes the TOCTOU window where a script could drop a symlink
+    pointing at e.g. ``/etc/passwd`` between validation and file open.
+    """
+    output_dir = (_db.SCRIPTS_DIR / script_id / "output").resolve()
+    # Reject path components with NUL bytes or traversal before touching disk.
+    if "\x00" in filename:
+        raise HTTPException(400, "Invalid filename")
+    candidate = (output_dir / filename)
+    # Walk each component and refuse symlinks anywhere along the chain.
+    rel = Path(filename)
+    cur = output_dir
+    for part in rel.parts:
+        if part in ("..", "") or "/" in part or "\\" in part:
+            raise HTTPException(400, "Invalid filename")
+        cur = cur / part
+        if cur.is_symlink():
+            raise HTTPException(400, "Invalid filename")
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(output_dir)
+    except ValueError:
+        raise HTTPException(400, "Invalid filename")
+    return resolved
+
+
 @router.get("/scripts/{script_id}/output/{filename:path}")
 async def download_output(script_id: str, filename: str, inline: bool = False, user=Depends(current_user)):
     from fastapi.responses import FileResponse
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
-    output_dir = _db.SCRIPTS_DIR / script_id / "output"
-    output_file = (output_dir / filename).resolve()
-    if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
-        raise HTTPException(400, "Invalid filename")
+    output_file = _resolve_output_path(script_id, filename)
     if not output_file.exists() or not output_file.is_file():
         raise HTTPException(404, "Output file not found")
     if inline:
@@ -272,10 +367,8 @@ async def download_output(script_id: str, filename: str, inline: bool = False, u
 async def delete_output(script_id: str, filename: str, user=Depends(current_user)):
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
-    output_dir = _db.SCRIPTS_DIR / script_id / "output"
-    output_file = (output_dir / filename).resolve()
-    if not str(output_file).startswith(str(output_dir.resolve()) + "/"):
-        raise HTTPException(400, "Invalid filename")
+    output_dir = (_db.SCRIPTS_DIR / script_id / "output").resolve()
+    output_file = _resolve_output_path(script_id, filename)
     if not output_file.exists():
         raise HTTPException(404, "Output file not found")
     output_file.unlink()
@@ -302,6 +395,8 @@ async def get_script_code(script_id: str, user=Depends(current_user)):
 
 @router.put("/scripts/{script_id}/code")
 async def update_script_code(script_id: str, body: CodeUpdateRequest, user=Depends(current_user)):
+    if len(body.code.encode("utf-8")) > MAX_CODE_BYTES:
+        raise HTTPException(413, f"Code exceeds {MAX_CODE_BYTES} bytes")
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
     script_file = _db.SCRIPTS_DIR / script_id / "script.py"
@@ -319,6 +414,8 @@ async def get_requirements(script_id: str, user=Depends(current_user)):
 
 @router.put("/scripts/{script_id}/requirements")
 async def update_requirements(script_id: str, body: RequirementsUpdateRequest, user=Depends(current_user)):
+    if len(body.requirements.encode("utf-8")) > MAX_REQUIREMENTS_BYTES:
+        raise HTTPException(413, f"requirements.txt exceeds {MAX_REQUIREMENTS_BYTES} bytes")
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
     req_file = _db.SCRIPTS_DIR / script_id / "requirements.txt"
@@ -332,6 +429,8 @@ async def update_requirements(script_id: str, body: RequirementsUpdateRequest, u
 @router.post("/scripts/{script_id}/requirements/reinstall")
 async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest, user=Depends(current_user)):
     """Write requirements.txt, delete venv, then trigger a fresh reinstall run."""
+    if len(body.requirements.encode("utf-8")) > MAX_REQUIREMENTS_BYTES:
+        raise HTTPException(413, f"requirements.txt exceeds {MAX_REQUIREMENTS_BYTES} bytes")
     from backend.services import executor
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
