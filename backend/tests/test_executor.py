@@ -45,3 +45,12 @@ def test_parse_invalid_negative():
 def test_parse_invalid_decimal():
     with pytest.raises(ValueError, match="Invalid interval"):
         parse_interval("1.5h")
+
+
+def test_parse_rejects_tight_loop():
+    # Intervals below the configured minimum should be rejected to prevent
+    # DoS via a 1-second polling loop.
+    with pytest.raises(ValueError, match="at least"):
+        parse_interval("1s")
+    with pytest.raises(ValueError, match="at least"):
+        parse_interval("5s")

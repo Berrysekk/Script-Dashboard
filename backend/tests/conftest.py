@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 import backend.db as db_module
+from backend.services.rate_limit import reset_rate_limits
 
 
 def _point_at_tmp(tmp_path) -> None:
@@ -11,6 +12,9 @@ def _point_at_tmp(tmp_path) -> None:
     db_module.DB_PATH     = tmp_path / "script-database"
     db_module.SCRIPTS_DIR = tmp_path / "scripts"
     db_module.LOGS_DIR    = tmp_path / "logs"
+    # Clear the process-global rate-limit buckets so tests don't bleed into
+    # each other.
+    reset_rate_limits()
 
 
 # Credentials used by the bootstrap helper for tests. Deliberately weak — these
