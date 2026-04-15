@@ -80,6 +80,8 @@ async def init_db() -> None:
     cols = {row[1] for row in await cur.fetchall()}
     if "owner_id" not in cols:
       await db.execute("ALTER TABLE scripts ADD COLUMN owner_id TEXT")
+    if "position" not in cols:
+      await db.execute("ALTER TABLE scripts ADD COLUMN position INTEGER DEFAULT 0")
 
     await db.commit()
 
