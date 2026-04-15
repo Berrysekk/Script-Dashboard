@@ -181,7 +181,7 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                 </button>
               )}
               {/* File rows */}
-              {!isCollapsed && dirFiles.map(f => {
+              {!isCollapsed && [...dirFiles].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime()).map(f => {
                 const basename = f.filename.split("/").at(-1)!;
                 const url      = `/api/scripts/${scriptId}/output/${encodeOutputPath(f.filename)}`;
                 return (
@@ -703,7 +703,7 @@ export default function ScriptDetail() {
                   .map(([date, runs]) => (
                     <div key={date} className="mb-3 last:mb-0">
                       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">{date}</p>
-                      {runs.map(r => (
+                      {[...runs].sort((a, b) => b.started_at.localeCompare(a.started_at)).map(r => (
                         <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-neutral-800 last:border-0 gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
