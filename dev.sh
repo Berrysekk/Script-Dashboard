@@ -52,7 +52,9 @@ trap cleanup INT TERM EXIT
 # ── Start backend ─────────────────────────────────────────────────────────────
 info "Starting backend..."
 cd "$ROOT"
-"$ROOT/backend/.venv/bin/uvicorn" backend.main:app --reload --port 8000 &>/tmp/sd-backend.log &
+"$ROOT/backend/.venv/bin/uvicorn" backend.main:app \
+  --reload --reload-dir "$ROOT/backend" \
+  --port 8000 &>/tmp/sd-backend.log &
 BACKEND_PID=$!
 ok "Backend started (PID $BACKEND_PID) — logs: /tmp/sd-backend.log"
 

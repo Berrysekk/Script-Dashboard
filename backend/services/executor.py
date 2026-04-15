@@ -39,6 +39,9 @@ _next_run: dict[str, datetime] = {}
 # script_id -> active subprocess (for force-kill)
 _active_procs: dict[str, asyncio.subprocess.Process] = {}
 
+# script_id -> active _execute task (includes venv setup, not just the script subprocess)
+_execute_tasks: dict[str, asyncio.Task] = {}
+
 
 def parse_interval(interval: str) -> int:
     """
@@ -94,7 +97,9 @@ async def run_script(script_id: str) -> str:
         )
         await db.commit()
 
-    asyncio.create_task(_execute(script_id, run_id, script_dir, log_file_path))
+    task = asyncio.create_task(_execute(script_id, run_id, script_dir, log_file_path))
+    _execute_tasks[script_id] = task
+    task.add_done_callback(lambda _: _execute_tasks.pop(script_id, None))
     return run_id
 
 
@@ -196,15 +201,20 @@ async def _execute(
     exit_code = -1
 
     try:
-        with open(log_path, "w", buffering=1) as lf:
+        with open(log_path, "a", buffering=1) as lf:
             def emit(line: str) -> None:
+                # Seek to end — pip/venv subprocesses write to the same file
+                # via a separate FD during create_venv, and our seek position
+                # would otherwise point inside their output.
+                lf.seek(0, 2)
                 lf.write(line)
                 lf.flush()
                 loop.create_task(_broadcast(run_id, line))
 
             if not venv_exists(script_dir):
                 lf.write("=== Setting up virtual environment ===\n")
-                await create_venv(script_dir, emit)
+                lf.flush()
+                await create_venv(script_dir, log_path, emit)
 
             output_dir = script_dir / "output"
             output_dir.mkdir(exist_ok=True)
@@ -480,6 +490,11 @@ async def force_stop(script_id: str) -> None:
             await proc.wait()
         except ProcessLookupError:
             pass
+
+    # Cancel the _execute task (covers venv setup + script subprocess)
+    exec_task = _execute_tasks.pop(script_id, None)
+    if exec_task and not exec_task.done():
+        exec_task.cancel()
 
     # Cancel loop task
     task = _loop_tasks.pop(script_id, None)

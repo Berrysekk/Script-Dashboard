@@ -293,6 +293,7 @@ async def reinstall_deps(script_id: str, user=Depends(current_user)):
     from backend.services import executor
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
+    await executor.force_stop(script_id)
     script_dir = _db.SCRIPTS_DIR / script_id
     venv_dir   = script_dir / "venv"
     if venv_dir.exists():
@@ -439,6 +440,7 @@ async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest, us
         req_file.write_text(body.requirements, encoding="utf-8")
     elif req_file.exists():
         req_file.unlink()
+    await executor.force_stop(script_id)
     # Nuke the venv so it gets rebuilt with the new requirements
     venv_dir = _db.SCRIPTS_DIR / script_id / "venv"
     if venv_dir.exists():
