@@ -91,7 +91,20 @@ function FilePreview({ scriptId, filename, onClose }: {
               <p className="text-sm text-gray-400">Loading...</p>
             </div>
           ) : isHtml ? (
-            <iframe src={`${url}?inline=1`} title={filename} className="w-full h-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
+            // SECURITY: user-generated HTML is rendered inside a sandboxed
+            // iframe WITHOUT `allow-same-origin`. Combining `allow-scripts`
+            // with `allow-same-origin` would let the document remove its own
+            // sandbox and execute in the dashboard's origin — a stored XSS
+            // primitive against any user who previews a file. The current
+            // attributes allow scripts to run (so dashboards can still
+            // preview interactive HTML reports) but deny access to cookies,
+            // localStorage, and same-origin fetch.
+            <iframe
+              src={`${url}?inline=1`}
+              title={filename}
+              className="w-full h-full border-0 bg-white"
+              sandbox="allow-scripts"
+            />
           ) : isImage ? (
             <div className="flex items-center justify-center h-full p-6 bg-neutral-100 dark:bg-neutral-950">
               <img src={`${url}?inline=1`} alt={filename} className="max-w-full max-h-full object-contain rounded" />

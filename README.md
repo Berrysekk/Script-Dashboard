@@ -120,6 +120,12 @@ environment:
 
 > Credentials are consumed **only on first start** (when no database exists). Changing them in the compose file after the first start has no effect — use the UI or CLI instead.
 
+If you forgot to note the generated passwords, pull them from the container logs:
+
+```bash
+docker exec script-dashboard sh -c 'grep -i -E "password|admin|master" /var/log/fastapi.stdout.log /var/log/fastapi.stderr.log'
+```
+
 ### 2. Start the container
 
 ```bash
