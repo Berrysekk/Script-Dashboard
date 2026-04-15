@@ -1,8 +1,54 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Fragment, type ReactNode } from "react";
 
 type Run = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
 type Props = { scriptId: string | null; scriptName: string; onClose: () => void; };
+
+// Minimal ANSI SGR parser — covers the 8 standard + bright foreground colors,
+// bold, dim, and reset. Anything else is stripped. Enough for typical CLI output.
+const ANSI_FG: Record<number, string> = {
+  30: "text-gray-500",   90: "text-gray-400",
+  31: "text-red-500",    91: "text-red-400",
+  32: "text-green-600 dark:text-green-400", 92: "text-green-400",
+  33: "text-amber-500",  93: "text-amber-400",
+  34: "text-blue-500",   94: "text-blue-400",
+  35: "text-fuchsia-500",95: "text-fuchsia-400",
+  36: "text-cyan-500",   96: "text-cyan-400",
+  37: "text-gray-300",   97: "text-white",
+};
+
+function renderAnsi(line: string): ReactNode {
+  // Match CSI SGR sequences: ESC [ <params> m
+  const matches = [...line.matchAll(/\x1b\[([0-9;]*)m/g)];
+  if (matches.length === 0) return line;
+  const out: ReactNode[] = [];
+  let last = 0;
+  let fg: string | null = null;
+  let bold = false;
+  let key = 0;
+
+  const flush = (text: string) => {
+    if (!text) return;
+    const cls = [fg, bold ? "font-semibold" : ""].filter(Boolean).join(" ");
+    out.push(cls ? <span key={key++} className={cls}>{text}</span> : <Fragment key={key++}>{text}</Fragment>);
+  };
+
+  for (const m of matches) {
+    flush(line.slice(last, m.index));
+    const codes = m[1].split(";").filter(Boolean).map(Number);
+    if (codes.length === 0) codes.push(0);
+    for (const c of codes) {
+      if (c === 0) { fg = null; bold = false; }
+      else if (c === 1) bold = true;
+      else if (c === 22) bold = false;
+      else if (c === 39) fg = null;
+      else if (ANSI_FG[c]) fg = ANSI_FG[c];
+    }
+    last = (m.index ?? 0) + m[0].length;
+  }
+  flush(line.slice(last));
+  return out;
+}
 
 function duration(start: string, end?: string) {
   if (!end) return "running...";
@@ -111,15 +157,21 @@ export default function LogDrawer({ scriptId, scriptName, onClose }: Props) {
             </button>
           ))}
         </div>
-        <div ref={logRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11.5px] leading-relaxed text-gray-500 dark:text-gray-400">
-          {lines.map((line, i) => (
-            <div key={i} className={
+        <div ref={logRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11.5px] leading-relaxed text-gray-500 dark:text-gray-400 whitespace-pre-wrap">
+          {lines.map((line, i) => {
+            const hasAnsi = line.includes("\x1b[");
+            const fallback = !hasAnsi && (
               /error|exception|traceback/i.test(line) ? "text-red-500 dark:text-red-400"
                 : /warn/i.test(line)                 ? "text-amber-500 dark:text-amber-400"
                 : /✓|success/i.test(line)            ? "text-green-600 dark:text-green-400"
                 : ""
-            }>{line || "\u00a0"}</div>
-          ))}
+            );
+            return (
+              <div key={i} className={fallback || ""}>
+                {line ? renderAnsi(line) : "\u00a0"}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
