@@ -16,6 +16,17 @@ _FIREJAIL: str | None = _shutil.which("firejail")
 _SANDBOX_ENABLED: bool = _os.environ.get("SCRIPT_SANDBOX", "1") != "0"
 _firejail_warned: bool = False
 
+# Resource limits for sandboxed scripts. These are defence-in-depth against a
+# hostile (or buggy) script exhausting CPU, memory, or disk on the host.
+# Overridable via env vars for operators that genuinely need more headroom.
+_SCRIPT_TIMEOUT_SECONDS = int(_os.environ.get("SCRIPT_TIMEOUT_SECONDS", 3600))     # 1 h
+_SCRIPT_MEMORY_BYTES    = int(_os.environ.get("SCRIPT_MEMORY_BYTES", 1_073_741_824))  # 1 GiB
+_SCRIPT_MAX_PROCS       = int(_os.environ.get("SCRIPT_MAX_PROCS", 64))
+_SCRIPT_MAX_FILESIZE    = int(_os.environ.get("SCRIPT_MAX_FILESIZE", 500 * 1024 * 1024))  # 500 MiB
+# Minimum allowed interval-style loop (seconds). Scheduled/monthly/once
+# loops are unaffected.
+_MIN_LOOP_INTERVAL_SECONDS = int(_os.environ.get("SCRIPT_MIN_LOOP_SECONDS", 30))
+
 # run_id -> list[asyncio.Queue]  — one Queue per connected WebSocket client
 _ws_queues: dict[str, list[asyncio.Queue]] = {}
 
@@ -59,7 +70,14 @@ def parse_interval(interval: str) -> int:
         raise ValueError(f"Invalid interval: {interval}")
     if value <= 0:
         raise ValueError(f"Invalid interval: {interval}")
-    return value * units[interval[-1]]
+    seconds = value * units[interval[-1]]
+    if seconds < _MIN_LOOP_INTERVAL_SECONDS:
+        # Guard against a tight loop DoS — an attacker could otherwise set
+        # an interval of "1s" and run the script 86,400 times/day.
+        raise ValueError(
+            f"Interval must be at least {_MIN_LOOP_INTERVAL_SECONDS}s"
+        )
+    return seconds
 
 
 async def run_script(script_id: str) -> str:
@@ -87,7 +105,12 @@ async def _broadcast(run_id: str, line: str) -> None:
 
 
 def _build_exec_cmd(venv_python: Path, script_dir: Path) -> list[str]:
-    """Build the subprocess command, wrapping with firejail when available."""
+    """Build the subprocess command, wrapping with firejail when available.
+
+    When firejail is available we also pin per-run CPU-time / memory / process
+    / file-size caps so a hostile script can't exhaust the host. When it isn't,
+    the caller also applies POSIX rlimits via ``preexec_fn`` (see ``_execute``).
+    """
     global _firejail_warned
 
     if _SANDBOX_ENABLED and _FIREJAIL:
@@ -99,6 +122,11 @@ def _build_exec_cmd(venv_python: Path, script_dir: Path) -> list[str]:
             "--read-only=.",
             "--read-write=output",
             "--noroot",
+            # Resource caps (firejail translates these to rlimits).
+            f"--rlimit-as={_SCRIPT_MEMORY_BYTES}",
+            f"--rlimit-nproc={_SCRIPT_MAX_PROCS}",
+            f"--rlimit-fsize={_SCRIPT_MAX_FILESIZE}",
+            f"--timeout={_format_hms(_SCRIPT_TIMEOUT_SECONDS)}",
             "--",
             str(venv_python.relative_to(script_dir)),
             "-u",
@@ -113,6 +141,47 @@ def _build_exec_cmd(venv_python: Path, script_dir: Path) -> list[str]:
         _firejail_warned = True
 
     return [str(venv_python), "-u", str(script_dir / "script.py")]
+
+
+def _format_hms(seconds: int) -> str:
+    """Format seconds as ``HH:MM:SS`` for firejail's --timeout flag."""
+    h, rem = divmod(max(seconds, 1), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def _apply_rlimits() -> None:
+    """preexec_fn used when firejail is unavailable.
+
+    Sets address-space, cpu-time, file-size and process caps on the child.
+    Swallows exceptions: this runs in the forked child and any uncaught
+    exception would kill the process before exec, producing a confusing
+    failure.
+    """
+    try:
+        import resource  # Unix-only — imported lazily for Windows test runs.
+        resource.setrlimit(
+            resource.RLIMIT_AS,
+            (_SCRIPT_MEMORY_BYTES, _SCRIPT_MEMORY_BYTES),
+        )
+        resource.setrlimit(
+            resource.RLIMIT_CPU,
+            (_SCRIPT_TIMEOUT_SECONDS, _SCRIPT_TIMEOUT_SECONDS + 5),
+        )
+        resource.setrlimit(
+            resource.RLIMIT_FSIZE,
+            (_SCRIPT_MAX_FILESIZE, _SCRIPT_MAX_FILESIZE),
+        )
+        try:
+            resource.setrlimit(
+                resource.RLIMIT_NPROC,
+                (_SCRIPT_MAX_PROCS, _SCRIPT_MAX_PROCS),
+            )
+        except (ValueError, OSError):
+            # Some kernels don't support RLIMIT_NPROC — best effort.
+            pass
+    except Exception:  # pragma: no cover — defence in depth only.
+        pass
 
 
 async def _execute(
@@ -144,19 +213,38 @@ async def _execute(
             run_env.pop("VIRTUAL_ENV", None)
             venv_python = script_dir / "venv" / "bin" / "python"
             exec_cmd = _build_exec_cmd(venv_python, script_dir)
-            proc = await asyncio.create_subprocess_exec(
-                *exec_cmd,
+            # Apply POSIX rlimits on every non-firejail spawn. firejail already
+            # sets its own rlimits, but stacking them is harmless and keeps the
+            # cap enforced even if firejail is misconfigured.
+            spawn_kwargs: dict = dict(
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(output_dir),
                 env=run_env,
             )
+            if _os.name == "posix":
+                spawn_kwargs["preexec_fn"] = _apply_rlimits
+            proc = await asyncio.create_subprocess_exec(*exec_cmd, **spawn_kwargs)
             _active_procs[script_id] = proc
             try:
-                async for raw in proc.stdout:
-                    emit(raw.decode())
-                await proc.wait()
+                async def _stream() -> None:
+                    async for raw in proc.stdout:
+                        emit(raw.decode())
+                    await proc.wait()
+
+                try:
+                    # Wall-clock ceiling enforced by the parent process. This
+                    # is belt-and-braces alongside firejail's --timeout and
+                    # RLIMIT_CPU (which only counts CPU time, not sleep).
+                    await asyncio.wait_for(_stream(), timeout=_SCRIPT_TIMEOUT_SECONDS + 30)
+                except asyncio.TimeoutError:
+                    emit(f"\n=== Killed after {_SCRIPT_TIMEOUT_SECONDS}s wall-clock timeout ===\n")
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
             finally:
                 _active_procs.pop(script_id, None)
             exit_code = proc.returncode
