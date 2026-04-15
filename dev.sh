@@ -36,6 +36,9 @@ fi
 export DATA_DIR="$ROOT/data"
 mkdir -p "$DATA_DIR"
 
+# ── Allow the Next.js dev server origin through the CSRF check ────────────────
+export SESSION_ALLOWED_ORIGINS="http://localhost:3000"
+
 # ── Process cleanup on exit ───────────────────────────────────────────────────
 BACKEND_PID=""
 cleanup() {

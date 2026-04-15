@@ -39,14 +39,18 @@ if (-not (Test-Path "$Root\frontend\node_modules")) {
 $env:DATA_DIR = "$Root\data"
 New-Item -ItemType Directory -Force -Path $env:DATA_DIR | Out-Null
 
+# ── Allow the Next.js dev server origin through the CSRF check ────────────────
+$env:SESSION_ALLOWED_ORIGINS = "http://localhost:3000"
+
 # ── Start backend as background job ──────────────────────────────────────────
 Write-Info "Starting backend..."
 $BackendJob = Start-Job -ScriptBlock {
-    param($root, $dataDir)
+    param($root, $dataDir, $allowedOrigins)
     $env:DATA_DIR = $dataDir
+    $env:SESSION_ALLOWED_ORIGINS = $allowedOrigins
     Set-Location $root
     & "$root\backend\.venv\Scripts\uvicorn" backend.main:app --reload --port 8000
-} -ArgumentList $Root, $env:DATA_DIR
+} -ArgumentList $Root, $env:DATA_DIR, $env:SESSION_ALLOWED_ORIGINS
 Write-Ok "Backend started (Job ID $($BackendJob.Id)) — use 'Receive-Job $($BackendJob.Id)' to see logs"
 
 Write-Host ""
