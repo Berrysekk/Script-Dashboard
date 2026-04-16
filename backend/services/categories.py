@@ -134,18 +134,6 @@ async def reorder_categories(db, category_ids: list[str]) -> None:
     await db.commit()
 
 
-async def set_category_scripts(db, cat_id: str, script_ids: list[str]) -> None:
-    """Replace the scripts assigned to a category."""
-    cur = await db.execute("SELECT id FROM categories WHERE id = ?", (cat_id,))
-    if not await cur.fetchone():
-        raise ValueError("Category not found")
-    await db.execute("DELETE FROM script_categories WHERE category_id = ?", (cat_id,))
-    for sid in script_ids:
-        await db.execute(
-            "INSERT OR IGNORE INTO script_categories (script_id, category_id) VALUES (?, ?)",
-            (sid, cat_id),
-        )
-    await db.commit()
 
 
 async def get_all_descendant_ids(db, cat_id: str) -> set[str]:
@@ -161,15 +149,16 @@ async def get_all_descendant_ids(db, cat_id: str) -> set[str]:
     return descendants
 
 
-async def get_script_category_ids(db, script_id: str) -> list[dict]:
-    """Return [{id, name}] for all categories a script belongs to."""
+async def get_script_category(db, script_id: str) -> dict | None:
+    """Return {id, name} for the script's category, or None."""
     cur = await db.execute(
         "SELECT c.id, c.name FROM categories c "
-        "JOIN script_categories sc ON sc.category_id = c.id "
-        "WHERE sc.script_id = ?",
+        "JOIN scripts s ON s.category_id = c.id "
+        "WHERE s.id = ?",
         (script_id,),
     )
-    return [{"id": r["id"], "name": r["name"]} for r in await cur.fetchall()]
+    row = await cur.fetchone()
+    return {"id": row["id"], "name": row["name"]} if row else None
 
 
 async def get_scripts_accessible_via_categories(db, role_name: str) -> set[str]:
@@ -187,8 +176,8 @@ async def get_scripts_accessible_via_categories(db, role_name: str) -> set[str]:
         return set()
     placeholders = ",".join("?" for _ in all_cat_ids)
     cur = await db.execute(
-        f"SELECT DISTINCT script_id FROM script_categories "
+        f"SELECT DISTINCT id FROM scripts "
         f"WHERE category_id IN ({placeholders})",
         tuple(all_cat_ids),
     )
-    return {r["script_id"] for r in await cur.fetchall()}
+    return {r["id"] for r in await cur.fetchall()}

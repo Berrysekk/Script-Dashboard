@@ -7,14 +7,13 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
   useSortable,
-  rectSortingStrategy,
+  arrayMove,
 } from "@dnd-kit/sortable";
+import type { SortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "motion/react";
 import ScriptCard, { Script } from "./components/ScriptCard";
@@ -24,7 +23,24 @@ import CategoryManagerModal from "./components/CategoryManagerModal";
 
 type FilterView = "all" | "running" | "idle";
 
-function SortableScriptCard({
+// Only the item at overIndex gets a transform (to active's rect). All others stay put.
+const swapStrategy: SortingStrategy = ({ rects, activeIndex, index, overIndex }) => {
+  if (index === activeIndex) return null;
+  if (index === overIndex && activeIndex !== -1) {
+    const active = rects[activeIndex];
+    const over = rects[overIndex];
+    if (!active || !over) return null;
+    return {
+      x: active.left - over.left,
+      y: active.top - over.top,
+      scaleX: 1,
+      scaleY: 1,
+    };
+  }
+  return null;
+};
+
+function SwappableScriptCard({
   script, onRun, onLoop, onStop, onLogs, index,
 }: {
   script: Script;
@@ -34,36 +50,51 @@ function SortableScriptCard({
   onLogs: () => void;
   index: number;
 }) {
+  const wasDragging = useRef(false);
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
   } = useSortable({ id: script.id });
 
-  const style = {
+  useEffect(() => {
+    if (isDragging) wasDragging.current = true;
+  }, [isDragging]);
+
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition ?? undefined,
     opacity: isDragging ? 0.4 : 1,
   };
 
+  const handleClickCapture = (e: React.MouseEvent) => {
+    if (wasDragging.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      wasDragging.current = false;
+    }
+  };
+
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 8, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      transition={{ duration: 0.15, delay: index * 0.03, ease: "easeOut" }}
+    <div
+      ref={setNodeRef}
+      style={style}
+      onClickCapture={handleClickCapture}
     >
-      <ScriptCard
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        script={script}
-        onRun={onRun}
-        onLoop={onLoop}
-        onStop={onStop}
-        onLogs={onLogs}
-        dragHandleProps={listeners}
-      />
-    </motion.div>
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.15, delay: index * 0.03, ease: "easeOut" }}
+      >
+        <ScriptCard
+          {...attributes}
+          script={script}
+          onRun={onRun}
+          onLoop={onLoop}
+          onStop={onStop}
+          onLogs={onLogs}
+          dragHandleProps={listeners}
+        />
+      </motion.div>
+    </div>
   );
 }
 
@@ -79,7 +110,6 @@ function StaticScriptCard({
 }) {
   return (
     <motion.div
-      layout
       initial={{ opacity: 0, y: 8, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97 }}
@@ -102,12 +132,14 @@ function CategorySection({
   onLoop,
   onStop,
   onLogs,
+  isDraggable,
 }: {
   group: { id: string | null; name: string; scripts: Script[] };
   onRun: (id: string) => Promise<void>;
   onLoop: (id: string, interval: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
   onLogs: (s: Script) => void;
+  isDraggable: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -129,24 +161,35 @@ function CategorySection({
         {!collapsed && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1, overflow: "visible" }}
+            exit={{ height: 0, opacity: 0, overflow: "hidden" }}
             transition={{ duration: 0.12 }}
-            className="overflow-hidden"
           >
             <div className="grid grid-cols-3 gap-3">
-              {group.scripts.map((s, i) => (
-                <StaticScriptCard
-                  key={s.id}
-                  script={s}
-                  onRun={onRun}
-                  onLoop={onLoop}
-                  onStop={onStop}
-                  onLogs={() => onLogs(s)}
-                  index={i}
-                />
-              ))}
-            </div>
+                {group.scripts.map((s, i) =>
+                  isDraggable ? (
+                    <SwappableScriptCard
+                      key={s.id}
+                      script={s}
+                      onRun={onRun}
+                      onLoop={onLoop}
+                      onStop={onStop}
+                      onLogs={() => onLogs(s)}
+                      index={i}
+                    />
+                  ) : (
+                    <StaticScriptCard
+                      key={s.id}
+                      script={s}
+                      onRun={onRun}
+                      onLoop={onLoop}
+                      onStop={onStop}
+                      onLogs={() => onLogs(s)}
+                      index={i}
+                    />
+                  )
+                )}
+              </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -159,30 +202,20 @@ export default function Dashboard() {
   const [showUpload, setShowUpload] = useState(false);
   const [logsFor, setLogsFor]       = useState<Script | null>(null);
   const [filter, setFilter]         = useState<FilterView>("all");
-  const [activeId, setActiveId]     = useState<string | null>(null);
   const [showCategories, setShowCategories] = useState(false);
-  const orderRef = useRef<string[] | null>(null);
   const hasLoaded = useRef(false);
+  const draggingRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
   const refresh = useCallback(async () => {
+    if (draggingRef.current) return;
     const res = await fetch("/api/scripts");
     if (res.ok) {
       const data: Script[] = await res.json();
-      if (orderRef.current) {
-        const map = new Map(data.map(s => [s.id, s]));
-        const ordered = orderRef.current.map(id => map.get(id)).filter(Boolean) as Script[];
-        const inOrder = new Set(orderRef.current);
-        for (const s of data) {
-          if (!inOrder.has(s.id)) ordered.push(s);
-        }
-        setScripts(ordered);
-      } else {
-        setScripts(data);
-      }
+      setScripts(data);
       hasLoaded.current = true;
     }
   }, []);
@@ -216,39 +249,34 @@ export default function Dashboard() {
     return true;
   });
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
+  const handleDragStart = () => {
+    draggingRef.current = true;
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
-    setActiveId(null);
+    draggingRef.current = false;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    const oldIndex = scripts.findIndex(s => s.id === active.id);
-    const newIndex = scripts.findIndex(s => s.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
+    // Swap in local state
+    const idxA = scripts.findIndex(s => s.id === active.id);
+    const idxB = scripts.findIndex(s => s.id === over.id);
+    if (idxA === -1 || idxB === -1) return;
 
-    const reordered = [...scripts];
-    const [moved] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, moved);
-    setScripts(reordered);
+    const swapped = [...scripts];
+    [swapped[idxA], swapped[idxB]] = [swapped[idxB], swapped[idxA]];
+    setScripts(swapped);
 
-    const newOrder = reordered.map(s => s.id);
-    orderRef.current = newOrder;
-
-    await fetch("/api/scripts/reorder", {
+    // Persist
+    await fetch("/api/scripts/swap", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script_ids: newOrder }),
+      body: JSON.stringify({ script_id_a: active.id as string, script_id_b: over.id as string }),
     });
-    orderRef.current = null;
   };
 
-  const activeScript = activeId ? scripts.find(s => s.id === activeId) : null;
   const isDraggable = filter === "all";
 
-  // Group scripts by category for display
   type CategoryGroup = {
     id: string | null;
     name: string;
@@ -257,29 +285,21 @@ export default function Dashboard() {
 
   const groupedScripts = (() => {
     const groups: CategoryGroup[] = [];
-    const seenCats = new Set<string>();
+    const catMap = new Map<string, CategoryGroup>();
     const uncategorized: Script[] = [];
 
-    // Collect all unique categories in order
     for (const s of filteredScripts) {
-      if (!s.categories?.length) {
+      if (!s.category) {
         uncategorized.push(s);
         continue;
       }
-      for (const cat of s.categories) {
-        if (!seenCats.has(cat.id)) {
-          seenCats.add(cat.id);
-          groups.push({ id: cat.id, name: cat.name, scripts: [] });
-        }
+      let group = catMap.get(s.category.id);
+      if (!group) {
+        group = { id: s.category.id, name: s.category.name, scripts: [] };
+        catMap.set(s.category.id, group);
+        groups.push(group);
       }
-    }
-    // Assign scripts to their categories
-    for (const s of filteredScripts) {
-      if (!s.categories?.length) continue;
-      for (const cat of s.categories) {
-        const g = groups.find(g => g.id === cat.id);
-        if (g) g.scripts.push(s);
-      }
+      group.scripts.push(s);
     }
     if (uncategorized.length > 0) {
       groups.push({ id: null, name: "Uncategorized", scripts: uncategorized });
@@ -354,55 +374,65 @@ export default function Dashboard() {
             No scripts match this filter.
           </motion.p>
         ) : hasCategories ? (
-          <div className="space-y-4">
-            {groupedScripts.map((group) => (
-              <CategorySection
-                key={group.id ?? "uncategorized"}
-                group={group}
-                onRun={handleRun}
-                onLoop={handleLoop}
-                onStop={handleStop}
-                onLogs={setLogsFor}
-              />
-            ))}
-          </div>
+          isDraggable ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={filteredScripts.map(s => s.id)} strategy={swapStrategy}>
+                <div className="space-y-4">
+                  {groupedScripts.map((group) => (
+                    <CategorySection
+                      key={group.id ?? "uncategorized"}
+                      group={group}
+                      onRun={handleRun}
+                      onLoop={handleLoop}
+                      onStop={handleStop}
+                      onLogs={setLogsFor}
+                      isDraggable
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          ) : (
+            <div className="space-y-4">
+              {groupedScripts.map((group) => (
+                <CategorySection
+                  key={group.id ?? "uncategorized"}
+                  group={group}
+                  onRun={handleRun}
+                  onLoop={handleLoop}
+                  onStop={handleStop}
+                  onLogs={setLogsFor}
+                  isDraggable={false}
+                />
+              ))}
+            </div>
+          )
         ) : isDraggable ? (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <SortableContext items={filteredScripts.map(s => s.id)} strategy={rectSortingStrategy}>
+            <SortableContext items={filteredScripts.map(s => s.id)} strategy={swapStrategy}>
               <div className="grid grid-cols-3 gap-3">
-                <AnimatePresence mode="popLayout">
-                  {filteredScripts.map((s, i) => (
-                    <SortableScriptCard
-                      key={s.id}
-                      script={s}
-                      onRun={handleRun}
-                      onLoop={handleLoop}
-                      onStop={handleStop}
-                      onLogs={() => setLogsFor(s)}
-                      index={hasLoaded.current ? 0 : i}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-            </SortableContext>
-            <DragOverlay>
-              {activeScript ? (
-                <div className="opacity-90 shadow-2xl rounded-xl">
-                  <ScriptCard
-                    script={activeScript}
+                {filteredScripts.map((s, i) => (
+                  <SwappableScriptCard
+                    key={s.id}
+                    script={s}
                     onRun={handleRun}
                     onLoop={handleLoop}
                     onStop={handleStop}
-                    onLogs={() => {}}
+                    onLogs={() => setLogsFor(s)}
+                    index={hasLoaded.current ? 0 : i}
                   />
-                </div>
-              ) : null}
-            </DragOverlay>
+                ))}
+              </div>
+            </SortableContext>
           </DndContext>
         ) : (
           <div className="grid grid-cols-3 gap-3">
