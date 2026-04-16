@@ -194,3 +194,114 @@ async def test_csrf_exempts_login(client):
         headers={"Origin": "http://evil.example"},
     )
     assert res.status_code == 200
+
+
+# ── Rate-limit bucket cannot be rotated via X-Forwarded-For ─────────────────
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_not_bypassable_via_xff(client):
+    # nginx replaces XFF with the real peer IP, but as a defence in depth
+    # the backend takes the right-most XFF entry (the one nginx guarantees).
+    # A client-controlled left-most entry must not rotate the bucket.
+    for i in range(10):
+        await client.post(
+            "/api/auth/login",
+            json={"username": "nobody", "password": "x"},
+            headers={"X-Forwarded-For": f"10.0.0.{i}, 127.0.0.1"},
+        )
+    res = await client.post(
+        "/api/auth/login",
+        json={"username": "nobody", "password": "x"},
+        headers={"X-Forwarded-For": "10.99.99.99, 127.0.0.1"},
+    )
+    assert res.status_code == 429
+
+
+# ── /scripts/swap requires access to both scripts ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_swap_rejects_unknown_script(auth_client):
+    upload = await auth_client.post(
+        "/api/scripts",
+        files={"file": ("a.py", io.BytesIO(b"pass"), "text/plain")},
+        data={"name": "A"},
+    )
+    sid = upload.json()["id"]
+    res = await auth_client.put(
+        "/api/scripts/swap",
+        json={"script_id_a": sid, "script_id_b": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert res.status_code == 404
+
+
+# ── /scripts/{id}/category is admin-only ────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_set_script_category_is_admin_only(client, auth_client):
+    # Admin creates a user and a script owned by that user.
+    await auth_client.post(
+        "/api/auth/users",
+        json={"username": "alice", "password": "alicepw", "role": "user"},
+    )
+    # alice logs in.
+    login = await client.post(
+        "/api/auth/login",
+        json={"username": "alice", "password": "alicepw"},
+    )
+    assert login.status_code == 200
+    upload = await client.post(
+        "/api/scripts",
+        files={"file": ("a.py", io.BytesIO(b"pass"), "text/plain")},
+        data={"name": "A"},
+    )
+    assert upload.status_code == 200
+    sid = upload.json()["id"]
+
+    # alice must not be able to reassign the category — that is an authz
+    # grant change and belongs to admin.
+    res = await client.put(
+        f"/api/scripts/{sid}/category",
+        json={"category_id": None},
+    )
+    assert res.status_code == 403
+
+
+# ── PRAGMA foreign_keys is ON (cascades fire) ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_category_delete_cascades_to_children(auth_client):
+    parent = await auth_client.post("/api/categories", json={"name": "parent"})
+    parent_id = parent.json()["id"]
+    child = await auth_client.post(
+        "/api/categories", json={"name": "child", "parent_id": parent_id}
+    )
+    child_id = child.json()["id"]
+
+    res = await auth_client.delete(f"/api/categories/{parent_id}")
+    assert res.status_code == 200
+
+    tree = await auth_client.get("/api/categories")
+    ids = {c["id"] for c in tree.json()}
+    assert parent_id not in ids
+    # Without foreign_keys=ON the child would survive as an orphan root.
+    assert child_id not in ids
+
+
+# ── Output responses advertise CSP: sandbox ─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_output_inline_sets_csp_sandbox(auth_client):
+    import backend.db as db_module
+
+    upload = await auth_client.post(
+        "/api/scripts",
+        files={"file": ("s.py", io.BytesIO(b"pass"), "text/plain")},
+        data={"name": "S"},
+    )
+    sid = upload.json()["id"]
+    (db_module.SCRIPTS_DIR / sid / "output" / "evil.html").write_text(
+        "<script>alert(1)</script>"
+    )
+    res = await auth_client.get(f"/api/scripts/{sid}/output/evil.html?inline=1")
+    assert res.status_code == 200
+    assert "sandbox" in res.headers.get("content-security-policy", "")
