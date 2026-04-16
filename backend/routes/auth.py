@@ -75,10 +75,19 @@ async def login(body: LoginRequest, request: Request, response: Response):
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort remote address for rate-limit bucket keys."""
+    """Remote address for rate-limit bucket keys.
+
+    We are always fronted by nginx (see nginx.conf), which appends the real
+    peer IP as the *last* entry of X-Forwarded-For. Any earlier entries are
+    client-controlled — taking the first value would let an attacker rotate
+    buckets via a spoofed header and bypass the rate limit entirely. Take
+    the right-most entry, which is the only one nginx guarantees.
+    """
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
