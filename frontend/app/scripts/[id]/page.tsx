@@ -265,6 +265,194 @@ function OutputSection({ scriptId }: { scriptId: string }) {
   );
 }
 
+// ── Variables section ───────────────────────────────────────────────────────
+type Variable = { key: string; value: string };
+
+function VariablesSection({ scriptId }: { scriptId: string }) {
+  const [vars, setVars] = useState<Variable[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newRows, setNewRows] = useState<Variable[]>([{ key: "", value: "" }]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const load = useCallback(() => {
+    fetch(`/api/scripts/${scriptId}/variables`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(d => setVars(d))
+      .catch(() => setVars([]))
+      .finally(() => setLoading(false));
+  }, [scriptId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const updateNewRow = (idx: number, field: "key" | "value", val: string) => {
+    setNewRows(rows => rows.map((r, i) => i === idx ? { ...r, [field]: val } : r));
+  };
+
+  const addRow = () => setNewRows(rows => [...rows, { key: "", value: "" }]);
+
+  const removeRow = (idx: number) => {
+    setNewRows(rows => rows.length <= 1 ? [{ key: "", value: "" }] : rows.filter((_, i) => i !== idx));
+  };
+
+  const saveAll = async () => {
+    const toSave = newRows.filter(r => r.key.trim());
+    if (toSave.length === 0) return;
+    setSaving(true);
+    setError("");
+    const res = await fetch(`/api/scripts/${scriptId}/variables/bulk`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: toSave.map(r => ({ key: r.key.trim(), value: r.value })) }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: "Failed to save" }));
+      setError(data.detail || "Failed to save");
+      setSaving(false);
+      return;
+    }
+    setNewRows([{ key: "", value: "" }]);
+    setSaving(false);
+    load();
+  };
+
+  const update = async (key: string, value: string) => {
+    setError("");
+    const res = await fetch(`/api/scripts/${scriptId}/variables`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: "Failed to update" }));
+      setError(data.detail || "Failed to update");
+    }
+    setEditingKey(null);
+    load();
+  };
+
+  const remove = async (key: string) => {
+    setError("");
+    const res = await fetch(`/api/scripts/${scriptId}/variables/${encodeURIComponent(key)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: "Failed to delete" }));
+      setError(data.detail || "Failed to delete");
+    }
+    load();
+  };
+
+  const hasValidNew = newRows.some(r => r.key.trim());
+
+  return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 min-w-0 overflow-hidden">
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        Variables
+        {vars.length > 0 && <span className="ml-2 font-normal">({vars.length})</span>}
+      </p>
+
+      {loading ? (
+        <p className="text-xs text-gray-400">Loading...</p>
+      ) : (
+        <>
+          {vars.length === 0 && newRows.length <= 1 && !newRows[0]?.key && (
+            <p className="text-xs text-gray-400 mb-3">
+              No variables yet. Variables are injected as environment variables at runtime.
+            </p>
+          )}
+
+          {vars.map(v => (
+            <div key={v.key} className="flex items-center gap-2 py-1.5 border-b border-gray-100 dark:border-neutral-800 last:border-0 min-w-0">
+              <span className="text-xs font-mono font-medium text-gray-600 dark:text-gray-300 truncate max-w-[40%]" title={v.key}>{v.key}</span>
+              <span className="text-gray-300 dark:text-neutral-600 shrink-0">=</span>
+              {editingKey === v.key ? (
+                <input
+                  className="flex-1 min-w-0 text-xs font-mono border border-blue-400 rounded px-2 py-0.5 bg-transparent focus:outline-none"
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={() => update(v.key, editValue)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") update(v.key, editValue);
+                    if (e.key === "Escape") setEditingKey(null);
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <span
+                  className="flex-1 min-w-0 text-xs font-mono text-gray-500 truncate cursor-pointer hover:text-gray-700 dark:hover:text-gray-300"
+                  onClick={() => { setEditingKey(v.key); setEditValue(v.value); }}
+                  title="Click to edit"
+                >
+                  {v.value || <span className="italic text-gray-300 dark:text-neutral-600">(empty)</span>}
+                </span>
+              )}
+              <button
+                onClick={() => remove(v.key)}
+                className="text-xs text-gray-400 hover:text-red-500 shrink-0 w-6 h-6 ml-2 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                title="Delete"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+
+          <div className="mt-3 space-y-1.5">
+            {newRows.map((row, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input
+                  className="text-xs font-mono border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 w-28"
+                  value={row.key}
+                  onChange={e => updateNewRow(idx, "key", e.target.value)}
+                  placeholder="KEY"
+                  onKeyDown={e => { if (e.key === "Enter") saveAll(); }}
+                />
+                <span className="text-gray-300 dark:text-neutral-600">=</span>
+                <input
+                  className="flex-1 min-w-0 text-xs font-mono border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  value={row.value}
+                  onChange={e => updateNewRow(idx, "value", e.target.value)}
+                  placeholder="value"
+                  onKeyDown={e => { if (e.key === "Enter") saveAll(); }}
+                />
+                {newRows.length > 1 && (
+                  <button
+                    onClick={() => removeRow(idx)}
+                    className="text-xs text-gray-400 hover:text-red-500 shrink-0 w-6 h-6 ml-2 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={addRow}
+              className="text-xs border border-gray-200 dark:border-neutral-700 px-2.5 py-1 rounded font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              + Add row
+            </button>
+            <button
+              onClick={saveAll}
+              disabled={!hasValidNew || saving}
+              className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1 rounded font-medium disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 // ── Code editor section ─────────────────────────────────────────────────────
 // Lazy-load CodeMirror to avoid SSR issues
 import dynamic from "next/dynamic";
@@ -276,7 +464,9 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
   const [saved, setSaved]       = useState(false);
   const [error, setError]       = useState("");
   const [collapsed, setCollapsed] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
   const [extensions, setExtensions] = useState<any[]>([]);
+  const [isDark, setIsDark]     = useState(false);
   const codeRef                 = useRef<string>("");
   const saveRef                 = useRef<() => void>(() => {});
 
@@ -286,26 +476,106 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
       .then(d => { setCode(d.code); codeRef.current = d.code; });
   }, [scriptId]);
 
-  // Load CodeMirror extensions (python + Ctrl+S keymap + theme overrides) client-side only
+  // Track dark mode reactively so the editor theme follows the app theme
+  useEffect(() => {
+    const root = document.documentElement;
+    const update = () => setIsDark(root.classList.contains("dark"));
+    update();
+    const obs = new MutationObserver(update);
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+
+  // Load CodeMirror extensions client-side only: python grammar, Ctrl+S keymap,
+  // theme overrides matching the app palette, and Prettier-style syntax colors.
   useEffect(() => {
     Promise.all([
       import("@codemirror/lang-python"),
       import("@codemirror/view"),
-    ]).then(([{ python }, { keymap, EditorView }]) => {
-      const themeOverride = EditorView.theme({
-        "&": { backgroundColor: "transparent" },
-        ".cm-gutters": { backgroundColor: "transparent", borderRight: "1px solid var(--cm-gutter-border, #e5e7eb)" },
-      });
+      import("@codemirror/language"),
+      import("@lezer/highlight"),
+    ]).then(([
+      { python },
+      { keymap, EditorView },
+      { HighlightStyle, syntaxHighlighting },
+      { tags: t },
+    ]) => {
+      // Prettier / VS Code-ish palette tuned for both light & dark
+      const prettierLight = HighlightStyle.define([
+        { tag: [t.keyword, t.modifier, t.self, t.null, t.bool], color: "#0000ff" },
+        { tag: [t.controlKeyword, t.operatorKeyword],           color: "#af00db" },
+        { tag: [t.definition(t.variableName), t.definition(t.propertyName)], color: "#001080" },
+        { tag: [t.function(t.variableName), t.function(t.propertyName)],     color: "#795e26" },
+        { tag: [t.className, t.typeName, t.namespace],          color: "#267f99" },
+        { tag: [t.string, t.special(t.string), t.regexp],       color: "#a31515" },
+        { tag: [t.number, t.integer, t.float],                  color: "#098658" },
+        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "#008000", fontStyle: "italic" },
+        { tag: [t.operator, t.punctuation, t.bracket, t.paren], color: "#000000" },
+        { tag: [t.propertyName],                                color: "#001080" },
+        { tag: [t.variableName],                                color: "#001080" },
+        { tag: [t.atom, t.constant(t.variableName)],            color: "#0070c1" },
+        { tag: [t.meta, t.annotation],                          color: "#795e26" },
+        { tag: [t.invalid],                                     color: "#cd3131" },
+      ]);
+
+      const prettierDark = HighlightStyle.define([
+        { tag: [t.keyword, t.modifier, t.self, t.null, t.bool], color: "#569cd6" },
+        { tag: [t.controlKeyword, t.operatorKeyword],           color: "#c586c0" },
+        { tag: [t.definition(t.variableName), t.definition(t.propertyName)], color: "#9cdcfe" },
+        { tag: [t.function(t.variableName), t.function(t.propertyName)],     color: "#dcdcaa" },
+        { tag: [t.className, t.typeName, t.namespace],          color: "#4ec9b0" },
+        { tag: [t.string, t.special(t.string), t.regexp],       color: "#ce9178" },
+        { tag: [t.number, t.integer, t.float],                  color: "#b5cea8" },
+        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "#6a9955", fontStyle: "italic" },
+        { tag: [t.operator, t.punctuation, t.bracket, t.paren], color: "#d4d4d4" },
+        { tag: [t.propertyName],                                color: "#9cdcfe" },
+        { tag: [t.variableName],                                color: "#9cdcfe" },
+        { tag: [t.atom, t.constant(t.variableName)],            color: "#4fc1ff" },
+        { tag: [t.meta, t.annotation],                          color: "#dcdcaa" },
+        { tag: [t.invalid],                                     color: "#f48771" },
+      ]);
+
+      const themeLight = EditorView.theme({
+        "&":                              { backgroundColor: "transparent", color: "#1f2937" },
+        ".cm-content":                    { caretColor: "#2563eb" },
+        ".cm-cursor, .cm-dropCursor":     { borderLeftColor: "#2563eb" },
+        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+          backgroundColor: "#dbeafe",
+        },
+        ".cm-gutters":                    { backgroundColor: "transparent", color: "#9ca3af", border: "none", borderRight: "1px solid #e5e7eb" },
+        ".cm-activeLine":                 { backgroundColor: "rgba(37, 99, 235, 0.04)" },
+        ".cm-activeLineGutter":           { backgroundColor: "transparent", color: "#4b5563" },
+        ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px" },
+        ".cm-matchingBracket":            { backgroundColor: "rgba(37, 99, 235, 0.12)", outline: "none" },
+        ".cm-foldPlaceholder":            { backgroundColor: "#e5e7eb", color: "#6b7280", border: "none" },
+      }, { dark: false });
+
+      const themeDark = EditorView.theme({
+        "&":                              { backgroundColor: "transparent", color: "#e5e7eb" },
+        ".cm-content":                    { caretColor: "#60a5fa" },
+        ".cm-cursor, .cm-dropCursor":     { borderLeftColor: "#60a5fa" },
+        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+          backgroundColor: "rgba(59, 130, 246, 0.25)",
+        },
+        ".cm-gutters":                    { backgroundColor: "transparent", color: "#6b7280", border: "none", borderRight: "1px solid #262626" },
+        ".cm-activeLine":                 { backgroundColor: "rgba(96, 165, 250, 0.06)" },
+        ".cm-activeLineGutter":           { backgroundColor: "transparent", color: "#d1d5db" },
+        ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px" },
+        ".cm-matchingBracket":            { backgroundColor: "rgba(96, 165, 250, 0.2)", outline: "none" },
+        ".cm-foldPlaceholder":            { backgroundColor: "#262626", color: "#9ca3af", border: "none" },
+      }, { dark: true });
+
       setExtensions([
         python(),
-        themeOverride,
+        isDark ? themeDark : themeLight,
+        syntaxHighlighting(isDark ? prettierDark : prettierLight),
         keymap.of([{
           key: "Mod-s",
           run: () => { saveRef.current(); return true; },
         }]),
       ]);
     });
-  }, []);
+  }, [isDark]);
 
   const save = async () => {
     const c = codeRef.current;
@@ -329,7 +599,13 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
 
   saveRef.current = save;
 
-  const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
+  // Close fullscreen on Escape
+  useEffect(() => {
+    if (!fullscreen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [fullscreen]);
 
   if (code === null) return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
@@ -337,36 +613,53 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
     </section>
   );
 
+  const editor = (height: string) => (
+    <CodeMirrorEditor
+      value={code}
+      onChange={(val) => { setCode(val); codeRef.current = val; }}
+      extensions={extensions}
+      theme="none"
+      height={height}
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        bracketMatching: true,
+        indentOnInput: true,
+        tabSize: 4,
+      }}
+    />
+  );
+
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <button
-        onClick={() => setCollapsed(c => !c)}
-        className="flex items-center justify-between w-full"
-      >
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-          <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
-          Code Editor
-        </p>
-        {!collapsed && <span className="text-[10px] text-gray-400">Ctrl+S / Cmd+S to save</span>}
-      </button>
+      <div className="flex items-center justify-between w-full">
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          className="flex items-center gap-1.5 flex-1 text-left"
+        >
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+            <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
+            Code Editor
+          </p>
+        </button>
+        {!collapsed && (
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[10px] text-gray-400">Ctrl+S / Cmd+S to save</span>
+            <button
+              onClick={() => setFullscreen(true)}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 border border-gray-200 dark:border-neutral-700 px-2.5 py-0.5 rounded"
+              title="View fullsize"
+            >
+              Fullsize
+            </button>
+          </div>
+        )}
+      </div>
 
       {!collapsed && (
         <>
           <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-gray-50 dark:bg-neutral-950">
-            <CodeMirrorEditor
-              value={code}
-              onChange={(val) => { setCode(val); codeRef.current = val; }}
-              extensions={extensions}
-              theme={isDark ? "dark" : "light"}
-              height="500px"
-              basicSetup={{
-                lineNumbers: true,
-                foldGutter: true,
-                bracketMatching: true,
-                indentOnInput: true,
-                tabSize: 4,
-              }}
-            />
+            {!fullscreen && editor("500px")}
           </div>
 
           {error && (
@@ -688,7 +981,7 @@ export default function ScriptDetail() {
         </div>
 
         {/* ── RIGHT: metadata + log history + danger ── */}
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
 
           {/* Metadata */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
@@ -715,6 +1008,9 @@ export default function ScriptDetail() {
               {saving ? "Saving…" : "Save"}
             </button>
           </section>
+
+          {/* Variables */}
+          <VariablesSection scriptId={id} />
 
           {/* Log history */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">

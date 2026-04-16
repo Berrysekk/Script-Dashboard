@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
 from backend.deps import current_user
-from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest, ScriptVariableRequest, ScriptVariablesBulkRequest
 
 router = APIRouter()
 
@@ -509,3 +509,141 @@ async def save_and_reinstall(script_id: str, body: RequirementsUpdateRequest, us
         shutil.rmtree(venv_dir)
     run_id = await executor.run_script(script_id)
     return {"ok": True, "run_id": run_id}
+
+
+# ── Script variables ──────────────────────────────────────────────────────
+
+MAX_VAR_KEY_LEN = 255
+MAX_VAR_VALUE_LEN = 10_000
+MAX_VARS_PER_SCRIPT = 50
+
+import re
+
+_VAR_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Keys that must never be overwritten — they control process execution,
+# library loading, or are reserved by this application.
+_BLOCKED_KEYS = frozenset({
+    "PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "PWD", "OLDPWD",
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+    "SCRIPT_OUTPUT_DIR", "SCRIPT_SANDBOX", "SCRIPT_TIMEOUT_SECONDS",
+    "SCRIPT_MEMORY_BYTES", "SCRIPT_MAX_PROCS", "SCRIPT_MAX_FILESIZE",
+    "SCRIPT_MIN_LOOP_SECONDS", "SCRIPT_MAX_UPLOAD_BYTES",
+    "DATA_DIR", "DATABASE_URL", "SECRET_KEY",
+})
+
+
+def _validate_var_key(key: str) -> str:
+    """Validate and return the stripped key, or raise HTTPException."""
+    key = key.strip()
+    if not key:
+        raise HTTPException(400, "Key cannot be empty")
+    if len(key) > MAX_VAR_KEY_LEN:
+        raise HTTPException(400, f"Key exceeds {MAX_VAR_KEY_LEN} characters")
+    if not _VAR_KEY_RE.match(key):
+        raise HTTPException(400, "Key must match [A-Za-z_][A-Za-z0-9_]* (valid env var name)")
+    if key.upper() in _BLOCKED_KEYS:
+        raise HTTPException(400, f"Key '{key}' is reserved and cannot be set")
+    return key
+
+
+def _validate_var_value(value: str) -> None:
+    if len(value) > MAX_VAR_VALUE_LEN:
+        raise HTTPException(400, f"Value exceeds {MAX_VAR_VALUE_LEN} characters")
+    if "\x00" in value:
+        raise HTTPException(400, "Value must not contain null bytes")
+
+
+@router.get("/scripts/{script_id}/variables")
+async def list_variables(script_id: str, user=Depends(current_user)):
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        cur = await db.execute(
+            "SELECT key, value FROM script_variables WHERE script_id = ? ORDER BY key",
+            (script_id,),
+        )
+        return [{"key": r["key"], "value": r["value"]} for r in await cur.fetchall()]
+
+
+@router.put("/scripts/{script_id}/variables")
+async def set_variable(script_id: str, body: ScriptVariableRequest, user=Depends(current_user)):
+    key = _validate_var_key(body.key)
+    _validate_var_value(body.value)
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        cur = await db.execute(
+            "SELECT COUNT(*) as cnt FROM script_variables WHERE script_id = ?",
+            (script_id,),
+        )
+        count = (await cur.fetchone())["cnt"]
+        existing = await db.execute(
+            "SELECT 1 FROM script_variables WHERE script_id = ? AND key = ?",
+            (script_id, key),
+        )
+        if not await existing.fetchone() and count >= MAX_VARS_PER_SCRIPT:
+            raise HTTPException(400, f"Maximum {MAX_VARS_PER_SCRIPT} variables per script")
+        await db.execute(
+            "INSERT INTO script_variables (script_id, key, value) VALUES (?, ?, ?) "
+            "ON CONFLICT(script_id, key) DO UPDATE SET value = excluded.value",
+            (script_id, key, body.value),
+        )
+        await db.commit()
+    return {"ok": True}
+
+
+@router.put("/scripts/{script_id}/variables/bulk")
+async def set_variables_bulk(script_id: str, body: ScriptVariablesBulkRequest, user=Depends(current_user)):
+    if len(body.variables) > MAX_VARS_PER_SCRIPT:
+        raise HTTPException(400, f"Maximum {MAX_VARS_PER_SCRIPT} variables per request")
+    validated = []
+    seen_keys: set[str] = set()
+    for v in body.variables:
+        key = _validate_var_key(v.key)
+        _validate_var_value(v.value)
+        if key in seen_keys:
+            raise HTTPException(400, f"Duplicate key: {key}")
+        seen_keys.add(key)
+        validated.append((key, v.value))
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        cur = await db.execute(
+            "SELECT COUNT(*) as cnt FROM script_variables WHERE script_id = ?",
+            (script_id,),
+        )
+        existing_count = (await cur.fetchone())["cnt"]
+        # Count how many are new (not updates)
+        existing_keys: set[str] = set()
+        if validated:
+            placeholders = ",".join("?" for _ in validated)
+            ecur = await db.execute(
+                f"SELECT key FROM script_variables WHERE script_id = ? AND key IN ({placeholders})",
+                (script_id, *(k for k, _ in validated)),
+            )
+            existing_keys = {r["key"] for r in await ecur.fetchall()}
+        new_count = sum(1 for k, _ in validated if k not in existing_keys)
+        if existing_count + new_count > MAX_VARS_PER_SCRIPT:
+            raise HTTPException(400, f"Would exceed maximum of {MAX_VARS_PER_SCRIPT} variables")
+        for key, value in validated:
+            await db.execute(
+                "INSERT INTO script_variables (script_id, key, value) VALUES (?, ?, ?) "
+                "ON CONFLICT(script_id, key) DO UPDATE SET value = excluded.value",
+                (script_id, key, value),
+            )
+        await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/scripts/{script_id}/variables/{key}")
+async def delete_variable(script_id: str, key: str, user=Depends(current_user)):
+    _validate_var_key(key)
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        cursor = await db.execute(
+            "DELETE FROM script_variables WHERE script_id = ? AND key = ?",
+            (script_id, key),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "Variable not found")
+    return {"ok": True}

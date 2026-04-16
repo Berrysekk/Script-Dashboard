@@ -91,6 +91,15 @@ async def init_db() -> None:
         FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
       )
     """)
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS script_variables (
+        script_id TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        value     TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (script_id, key),
+        FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+      )
+    """)
     await db.execute("INSERT OR IGNORE INTO roles (name) VALUES ('admin')")
     await db.execute("INSERT OR IGNORE INTO roles (name) VALUES ('user')")
 

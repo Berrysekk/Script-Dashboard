@@ -219,6 +219,23 @@ async def _execute(
             output_dir = script_dir / "output"
             output_dir.mkdir(exist_ok=True)
             run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(output_dir)}
+            # Inject user-defined variables (set BEFORE SCRIPT_OUTPUT_DIR
+            # so a malicious key can never shadow it — we re-set it after).
+            async with _db.get_db() as db:
+                cur = await db.execute(
+                    "SELECT key, value FROM script_variables WHERE script_id = ?",
+                    (script_id,),
+                )
+                _SAFE_SKIP = {"PATH", "HOME", "USER", "SHELL", "LD_PRELOAD",
+                              "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
+                              "DYLD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME",
+                              "VIRTUAL_ENV", "SCRIPT_OUTPUT_DIR"}
+                for row in await cur.fetchall():
+                    k = row["key"]
+                    if k.upper() not in _SAFE_SKIP and "\x00" not in row["value"]:
+                        run_env[k] = row["value"]
+            # Re-assert critical vars so user variables can never shadow them
+            run_env["SCRIPT_OUTPUT_DIR"] = str(output_dir)
             # Remove backend venv vars so the script uses its own venv
             run_env.pop("VIRTUAL_ENV", None)
             venv_python = script_dir / "venv" / "bin" / "python"
