@@ -49,9 +49,12 @@ function CategoryCheckboxTree({
         return (
           <div key={node.id}>
             <label
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
-              style={{ paddingLeft: `${12 + depth * 16}px` }}
+              className="flex items-center gap-2 py-1 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer rounded"
+              style={{ paddingLeft: `${8 + depth * 20}px` }}
             >
+              {depth > 0 && (
+                <span className="text-gray-300 dark:text-neutral-600 text-[10px] mr-0.5">&#8226;</span>
+              )}
               <input
                 type="checkbox"
                 checked={checked}
@@ -59,11 +62,6 @@ function CategoryCheckboxTree({
                 className="rounded border-gray-300 dark:border-neutral-600"
               />
               <span className="text-xs">{node.name}</span>
-              {hasChildren && (
-                <span className="text-[10px] text-gray-400 ml-auto">
-                  {node.children.length} sub
-                </span>
-              )}
             </label>
             {hasChildren && (
               <CategoryCheckboxTree
@@ -490,7 +488,7 @@ export default function UsersPage() {
               {categories.length > 0 && (
                 <div className="mb-4">
                   <label className="block text-[10px] text-gray-400 mb-2">Categories this role can access</label>
-                  <div className="max-h-[200px] overflow-y-auto border border-gray-200 dark:border-neutral-700 rounded-lg divide-y divide-gray-100 dark:divide-neutral-800">
+                  <div className="max-h-[200px] overflow-y-auto border border-gray-200 dark:border-neutral-700 rounded-lg py-1">
                     <CategoryCheckboxTree
                       nodes={categories}
                       selected={roleCategories}
