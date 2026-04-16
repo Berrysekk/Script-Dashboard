@@ -486,95 +486,178 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
     return () => obs.disconnect();
   }, []);
 
-  // Load CodeMirror extensions client-side only: python grammar, Ctrl+S keymap,
-  // theme overrides matching the app palette, and Prettier-style syntax colors.
+  // Load CodeMirror extensions + theme client-side only.
+  // Dark: Cursor Dark Anysphere — hand-ported from /Applications/Cursor.app theme JSON
+  //       (teal keywords, peach types, warm-yellow functions, pink strings, italic control flow).
+  // Light: VS Code Light+ palette (surface + HighlightStyle bundled).
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
       import("@codemirror/lang-python"),
       import("@codemirror/view"),
       import("@codemirror/language"),
+      import("@codemirror/state"),
       import("@lezer/highlight"),
     ]).then(([
       { python },
-      { keymap, EditorView },
-      { HighlightStyle, syntaxHighlighting },
+      { keymap, EditorView, ViewPlugin, Decoration },
+      { HighlightStyle, syntaxHighlighting, syntaxTree },
+      { RangeSetBuilder },
       { tags: t },
     ]) => {
-      // Prettier / VS Code-ish palette tuned for both light & dark
-      const prettierLight = HighlightStyle.define([
-        { tag: [t.keyword, t.modifier, t.self, t.null, t.bool], color: "#0000ff" },
-        { tag: [t.controlKeyword, t.operatorKeyword],           color: "#af00db" },
-        { tag: [t.definition(t.variableName), t.definition(t.propertyName)], color: "#001080" },
-        { tag: [t.function(t.variableName), t.function(t.propertyName)],     color: "#795e26" },
-        { tag: [t.className, t.typeName, t.namespace],          color: "#267f99" },
-        { tag: [t.string, t.special(t.string), t.regexp],       color: "#a31515" },
-        { tag: [t.number, t.integer, t.float],                  color: "#098658" },
-        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "#008000", fontStyle: "italic" },
-        { tag: [t.operator, t.punctuation, t.bracket, t.paren], color: "#000000" },
-        { tag: [t.propertyName],                                color: "#001080" },
-        { tag: [t.variableName],                                color: "#001080" },
-        { tag: [t.atom, t.constant(t.variableName)],            color: "#0070c1" },
-        { tag: [t.meta, t.annotation],                          color: "#795e26" },
-        { tag: [t.invalid],                                     color: "#cd3131" },
-      ]);
+      if (cancelled) return;
 
-      const prettierDark = HighlightStyle.define([
-        { tag: [t.keyword, t.modifier, t.self, t.null, t.bool], color: "#569cd6" },
-        { tag: [t.controlKeyword, t.operatorKeyword],           color: "#c586c0" },
-        { tag: [t.definition(t.variableName), t.definition(t.propertyName)], color: "#9cdcfe" },
-        { tag: [t.function(t.variableName), t.function(t.propertyName)],     color: "#dcdcaa" },
-        { tag: [t.className, t.typeName, t.namespace],          color: "#4ec9b0" },
-        { tag: [t.string, t.special(t.string), t.regexp],       color: "#ce9178" },
-        { tag: [t.number, t.integer, t.float],                  color: "#b5cea8" },
-        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "#6a9955", fontStyle: "italic" },
-        { tag: [t.operator, t.punctuation, t.bracket, t.paren], color: "#d4d4d4" },
-        { tag: [t.propertyName],                                color: "#9cdcfe" },
-        { tag: [t.variableName],                                color: "#9cdcfe" },
-        { tag: [t.atom, t.constant(t.variableName)],            color: "#4fc1ff" },
-        { tag: [t.meta, t.annotation],                          color: "#dcdcaa" },
-        { tag: [t.invalid],                                     color: "#f48771" },
-      ]);
-
-      const themeLight = EditorView.theme({
-        "&":                              { backgroundColor: "transparent", color: "#1f2937" },
+      const lightSurface = EditorView.theme({
+        "&":                              { backgroundColor: "#ffffff", color: "#1f2937" },
         ".cm-content":                    { caretColor: "#2563eb" },
         ".cm-cursor, .cm-dropCursor":     { borderLeftColor: "#2563eb" },
         "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-          backgroundColor: "#dbeafe",
+          backgroundColor: "#add6ff",
         },
-        ".cm-gutters":                    { backgroundColor: "transparent", color: "#9ca3af", border: "none", borderRight: "1px solid #e5e7eb" },
-        ".cm-activeLine":                 { backgroundColor: "rgba(37, 99, 235, 0.04)" },
-        ".cm-activeLineGutter":           { backgroundColor: "transparent", color: "#4b5563" },
+        ".cm-gutters":                    { backgroundColor: "#ffffff", color: "#9ca3af", border: "none", borderRight: "1px solid #e5e7eb" },
+        ".cm-activeLine":                 { backgroundColor: "#f3f4f6" },
+        ".cm-activeLineGutter":           { backgroundColor: "#f3f4f6", color: "#4b5563" },
         ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px" },
-        ".cm-matchingBracket":            { backgroundColor: "rgba(37, 99, 235, 0.12)", outline: "none" },
+        ".cm-matchingBracket":            { backgroundColor: "rgba(37, 99, 235, 0.15)", outline: "1px solid #2563eb" },
         ".cm-foldPlaceholder":            { backgroundColor: "#e5e7eb", color: "#6b7280", border: "none" },
+        ".cm-selectionMatch":             { backgroundColor: "#e5e7eb" },
       }, { dark: false });
 
-      const themeDark = EditorView.theme({
-        "&":                              { backgroundColor: "transparent", color: "#e5e7eb" },
-        ".cm-content":                    { caretColor: "#60a5fa" },
-        ".cm-cursor, .cm-dropCursor":     { borderLeftColor: "#60a5fa" },
+      // VS Code Light+ palette
+      const lightHighlight = HighlightStyle.define([
+        { tag: [t.keyword, t.modifier, t.self, t.null, t.definitionKeyword, t.moduleKeyword], color: "#0000ff" },
+        { tag: [t.controlKeyword, t.operatorKeyword],              color: "#af00db" },
+        { tag: [t.bool, t.atom, t.constant(t.variableName)],       color: "#0070c1" },
+        { tag: [t.definition(t.variableName)],                     color: "#001080" },
+        { tag: [t.definition(t.propertyName)],                     color: "#001080" },
+        { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#795e26" },
+        { tag: [t.className, t.typeName, t.namespace],             color: "#267f99" },
+        { tag: [t.string, t.special(t.string)],                    color: "#a31515" },
+        { tag: [t.regexp],                                         color: "#811f3f" },
+        { tag: [t.number, t.integer, t.float],                     color: "#098658" },
+        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "#008000", fontStyle: "italic" },
+        { tag: [t.operator, t.derefOperator],                      color: "#000000" },
+        { tag: [t.punctuation, t.bracket, t.paren, t.brace, t.squareBracket], color: "#000000" },
+        { tag: [t.propertyName],                                   color: "#001080" },
+        { tag: [t.variableName],                                   color: "#001080" },
+        { tag: [t.meta, t.annotation],                             color: "#795e26" },
+        { tag: [t.invalid],                                        color: "#cd3131" },
+      ]);
+
+      const lightTheme = [lightSurface, syntaxHighlighting(lightHighlight)];
+
+      // Cursor Dark (Anysphere) surface — ported from
+      // /Applications/Cursor.app/Contents/Resources/app/extensions/theme-cursor/themes/cursor-dark-color-theme.json
+      const cursorDarkSurface = EditorView.theme({
+        "&":                              { backgroundColor: "#181818", color: "#E4E4E4" },
+        ".cm-content":                    { caretColor: "#E4E4E4" },
+        ".cm-cursor, .cm-dropCursor":     { borderLeftColor: "#E4E4E4" },
         "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-          backgroundColor: "rgba(59, 130, 246, 0.25)",
+          backgroundColor: "rgba(64, 64, 64, 0.6)",
         },
-        ".cm-gutters":                    { backgroundColor: "transparent", color: "#6b7280", border: "none", borderRight: "1px solid #262626" },
-        ".cm-activeLine":                 { backgroundColor: "rgba(96, 165, 250, 0.06)" },
-        ".cm-activeLineGutter":           { backgroundColor: "transparent", color: "#d1d5db" },
+        ".cm-gutters":                    { backgroundColor: "#181818", color: "rgba(228, 228, 228, 0.26)", border: "none" },
+        ".cm-activeLine":                 { backgroundColor: "#262626" },
+        ".cm-activeLineGutter":           { backgroundColor: "#262626", color: "#E4E4E4" },
         ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px" },
-        ".cm-matchingBracket":            { backgroundColor: "rgba(96, 165, 250, 0.2)", outline: "none" },
-        ".cm-foldPlaceholder":            { backgroundColor: "#262626", color: "#9ca3af", border: "none" },
+        ".cm-matchingBracket":            { backgroundColor: "rgba(228, 228, 228, 0.12)", outline: "none" },
+        ".cm-foldPlaceholder":            { backgroundColor: "rgba(228, 228, 228, 0.07)", color: "#E4E4E4", border: "none" },
+        ".cm-selectionMatch":             { backgroundColor: "rgba(64, 64, 64, 0.8)" },
+        ".cm-panels":                     { backgroundColor: "#141414", color: "#E4E4E4" },
+        ".cm-searchMatch":                { backgroundColor: "rgba(136, 192, 208, 0.27)", outline: "none" },
+        ".cm-tooltip":                    { backgroundColor: "#141414", borderColor: "rgba(228, 228, 228, 0.13)", color: "#E4E4E4" },
       }, { dark: true });
+
+      // Cursor Dark Anysphere palette — extracted from the theme JSON.
+      // Tag order matters: more-specific tags must precede their generalizations.
+      const cursorDarkHighlight = HighlightStyle.define([
+        // Keywords — teal/cyan base
+        { tag: [t.keyword, t.modifier, t.definitionKeyword],                     color: "#82D2CE" },
+        // import/from + control flow (if/else/for/while/return) — italic, per Cursor theme
+        { tag: [t.moduleKeyword, t.controlKeyword],                              color: "#82D2CE", fontStyle: "italic" },
+        { tag: [t.operatorKeyword],                                              color: "#82D2CE" },
+        // self — rose (language variable)
+        { tag: [t.self],                                                         color: "#CC7C8A" },
+        // None / True / False — builtin constant teal
+        { tag: [t.null, t.bool, t.atom],                                         color: "#82D2CE" },
+        // Numbers — warm yellow
+        { tag: [t.number, t.integer, t.float],                                   color: "#EBC88D" },
+        { tag: [t.constant(t.variableName)],                                     color: "#AAA0FA" },
+        // Strings — pink
+        { tag: [t.string, t.special(t.string)],                                  color: "#E394DC" },
+        { tag: [t.regexp],                                                       color: "#D6D6DD" },
+        { tag: [t.escape],                                                       color: "#D6D6DD" },
+        // Builtin types (str/int/list) — teal; user-defined typeNames — peach
+        { tag: [t.standard(t.typeName)],                                         color: "#82D2CE" },
+        { tag: [t.typeName],                                                     color: "#EFB080" },
+        { tag: [t.className],                                                    color: "#87C3FF" },
+        { tag: [t.namespace],                                                    color: "#CCCCCC" },
+        // Function definitions — peach bold; function calls — warm yellow
+        { tag: [t.function(t.definition(t.variableName))],                       color: "#EFB080", fontWeight: "bold" },
+        { tag: [t.function(t.variableName), t.function(t.propertyName)],         color: "#EBC88D" },
+        // Properties / attributes — lavender
+        { tag: [t.propertyName, t.definition(t.propertyName)],                   color: "#AAA0FA" },
+        { tag: [t.attributeName],                                                color: "#AAA0FA" },
+        // Plain variables — near-white
+        { tag: [t.definition(t.variableName), t.variableName],                   color: "#D6D6DD" },
+        // Decorators / annotations — green
+        { tag: [t.meta, t.annotation],                                           color: "#A8CC7C" },
+        // Operators — near-white (Cursor theme treats them as plain punctuation)
+        { tag: [t.operator, t.derefOperator, t.arithmeticOperator, t.logicOperator, t.bitwiseOperator, t.compareOperator], color: "#D6D6DD" },
+        { tag: [t.punctuation, t.bracket, t.paren, t.brace, t.squareBracket],    color: "#D6D6DD" },
+        // Comments — muted E4E4E4 at 37% opacity, italic
+        { tag: [t.comment, t.lineComment, t.blockComment, t.docComment],         color: "#E4E4E45E", fontStyle: "italic" },
+        // Markdown niceties
+        { tag: [t.heading],                                                      color: "#D6D6DD", fontWeight: "bold" },
+        { tag: [t.strong],                                                       color: "#F8C762", fontWeight: "bold" },
+        { tag: [t.emphasis],                                                     color: "#82D2CE", fontStyle: "italic" },
+        { tag: [t.link, t.url],                                                  color: "#AAA0FA", textDecoration: "underline" },
+        { tag: [t.invalid],                                                      color: "#E34671" },
+      ]);
+
+      // Italicize the `from` keyword in `from X import Y` to match Cursor's theme.
+      // Lezer-python tags it as `definitionKeyword` (bundled with def/class/lambda),
+      // so HighlightStyle alone can't separate it — we post-decorate matching tokens.
+      // Include color in the inline style since the mark decoration nests above the
+      // highlighter's color class and suppresses it on the same range.
+      const italicMark = Decoration.mark({ attributes: { style: "font-style: italic; color: #82D2CE" } });
+      const fromItalicPlugin = ViewPlugin.fromClass(
+        class {
+          decorations = Decoration.none;
+          constructor(view: any) { this.decorations = this.build(view); }
+          update(u: any) {
+            if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+          }
+          build(view: any) {
+            const b = new RangeSetBuilder<any>();
+            for (const { from, to } of view.visibleRanges) {
+              syntaxTree(view.state).iterate({
+                from, to,
+                enter: (n: any) => {
+                  if (n.name !== "ImportStatement") return;
+                  const text = view.state.doc.sliceString(n.from, n.to);
+                  // Match the leading `from` keyword (always at node start in `from X import Y`)
+                  if (text.startsWith("from ")) b.add(n.from, n.from + 4, italicMark);
+                },
+              });
+            }
+            return b.finish();
+          }
+        },
+        { decorations: (v: any) => v.decorations },
+      );
+
+      const cursorDark = [cursorDarkSurface, syntaxHighlighting(cursorDarkHighlight), fromItalicPlugin];
 
       setExtensions([
         python(),
-        isDark ? themeDark : themeLight,
-        syntaxHighlighting(isDark ? prettierDark : prettierLight),
+        isDark ? cursorDark : lightTheme,
         keymap.of([{
           key: "Mod-s",
           run: () => { saveRef.current(); return true; },
         }]),
       ]);
     });
+    return () => { cancelled = true; };
   }, [isDark]);
 
   const save = async () => {
@@ -659,7 +742,7 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
       {!collapsed && (
         <>
           {!fullscreen && (
-            <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-gray-50 dark:bg-neutral-950">
+            <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-white dark:bg-[#181818]">
               {editor("500px")}
             </div>
           )}
@@ -731,8 +814,8 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
                 </div>
 
                 {/* Editor */}
-                <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-neutral-950">
-                  {editor("100%")}
+                <div className="flex-1 min-h-0 bg-white dark:bg-[#181818]">
+                  {editor("calc(100dvh - 7rem)")}
                 </div>
 
                 {error && (
