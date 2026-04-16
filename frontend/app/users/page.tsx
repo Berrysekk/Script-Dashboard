@@ -13,6 +13,7 @@ type UserRow = {
 type Role = {
   name: string;
   script_ids: string[];
+  category_ids: string[];
 };
 
 type ScriptSummary = {
@@ -20,11 +21,70 @@ type ScriptSummary = {
   name: string;
 };
 
+type CategoryNode = {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  position: number;
+  children: CategoryNode[];
+};
+
+function CategoryCheckboxTree({
+  nodes,
+  selected,
+  onToggle,
+  depth = 0,
+}: {
+  nodes: CategoryNode[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  depth?: number;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const checked = selected.has(node.id);
+        const hasChildren = node.children.length > 0;
+        return (
+          <div key={node.id}>
+            <label
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
+              style={{ paddingLeft: `${12 + depth * 16}px` }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggle(node.id)}
+                className="rounded border-gray-300 dark:border-neutral-600"
+              />
+              <span className="text-xs">{node.name}</span>
+              {hasChildren && (
+                <span className="text-[10px] text-gray-400 ml-auto">
+                  {node.children.length} sub
+                </span>
+              )}
+            </label>
+            {hasChildren && (
+              <CategoryCheckboxTree
+                nodes={node.children}
+                selected={selected}
+                onToggle={onToggle}
+                depth={depth + 1}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export default function UsersPage() {
   const { user } = useAuth();
   const [rows, setRows]         = useState<UserRow[]>([]);
   const [roles, setRoles]       = useState<Role[]>([]);
   const [scripts, setScripts]   = useState<ScriptSummary[]>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
   const [loading, setLoading]   = useState(true);
   const [denied, setDenied]     = useState(false);
   const [error, setError]       = useState("");
@@ -40,14 +100,16 @@ export default function UsersPage() {
   const [editingRole, setEditingRole]   = useState<string | null>(null);
   const [roleName, setRoleName]         = useState("");
   const [roleScripts, setRoleScripts]   = useState<Set<string>>(new Set());
+  const [roleCategories, setRoleCategories] = useState<Set<string>>(new Set());
   const [savingRole, setSavingRole]     = useState(false);
 
   const loadAll = useCallback(async () => {
     setError("");
-    const [usersRes, rolesRes, scriptsRes] = await Promise.all([
+    const [usersRes, rolesRes, scriptsRes, catsRes] = await Promise.all([
       fetch("/api/auth/users"),
       fetch("/api/auth/roles"),
       fetch("/api/scripts"),
+      fetch("/api/categories"),
     ]);
     if (usersRes.status === 403) {
       setDenied(true);
@@ -62,6 +124,7 @@ export default function UsersPage() {
     setRows(await usersRes.json());
     if (rolesRes.ok) setRoles(await rolesRes.json());
     if (scriptsRes.ok) setScripts(await scriptsRes.json());
+    if (catsRes.ok) setCategories(await catsRes.json());
     setLoading(false);
   }, []);
 
@@ -95,6 +158,7 @@ export default function UsersPage() {
     setEditingRole(null);
     setRoleName("");
     setRoleScripts(new Set());
+    setRoleCategories(new Set());
     setShowRoleForm(true);
   };
 
@@ -102,6 +166,7 @@ export default function UsersPage() {
     setEditingRole(role.name);
     setRoleName(role.name);
     setRoleScripts(new Set(role.script_ids));
+    setRoleCategories(new Set(role.category_ids));
     setShowRoleForm(true);
   };
 
@@ -112,14 +177,14 @@ export default function UsersPage() {
         const res = await fetch(`/api/auth/roles/${encodeURIComponent(editingRole)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ script_ids: [...roleScripts] }),
+          body: JSON.stringify({ script_ids: [...roleScripts], category_ids: [...roleCategories] }),
         });
         if (!res.ok) throw new Error(await res.text());
       } else {
         const res = await fetch("/api/auth/roles", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: roleName, script_ids: [...roleScripts] }),
+          body: JSON.stringify({ name: roleName, script_ids: [...roleScripts], category_ids: [...roleCategories] }),
         });
         if (!res.ok) throw new Error(await res.text());
       }
@@ -141,6 +206,41 @@ export default function UsersPage() {
     setRoleScripts(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const collectDescendantIds = (node: CategoryNode): string[] => {
+    const ids: string[] = [];
+    for (const child of node.children) {
+      ids.push(child.id);
+      ids.push(...collectDescendantIds(child));
+    }
+    return ids;
+  };
+
+  const findNode = (nodes: CategoryNode[], id: string): CategoryNode | null => {
+    for (const n of nodes) {
+      if (n.id === id) return n;
+      const found = findNode(n.children, id);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const toggleCategory = (id: string) => {
+    setRoleCategories(prev => {
+      const next = new Set(prev);
+      const node = findNode(categories, id);
+      if (!node) return next;
+      const descendants = collectDescendantIds(node);
+      if (next.has(id)) {
+        next.delete(id);
+        for (const d of descendants) next.delete(d);
+      } else {
+        next.add(id);
+        for (const d of descendants) next.add(d);
+      }
       return next;
     });
   };
@@ -290,9 +390,12 @@ export default function UsersPage() {
                   </div>
                   {!isSystem && (
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      {r.script_ids.length === 0
-                        ? "No scripts assigned"
-                        : `${r.script_ids.length} script${r.script_ids.length > 1 ? "s" : ""} assigned`}
+                      {r.script_ids.length === 0 && r.category_ids.length === 0
+                        ? "No scripts or categories assigned"
+                        : [
+                            r.script_ids.length > 0 && `${r.script_ids.length} script${r.script_ids.length > 1 ? "s" : ""}`,
+                            r.category_ids.length > 0 && `${r.category_ids.length} categor${r.category_ids.length > 1 ? "ies" : "y"}`,
+                          ].filter(Boolean).join(", ") + " assigned"}
                     </p>
                   )}
                   {isSystem && (
@@ -369,6 +472,20 @@ export default function UsersPage() {
                   )}
                 </div>
               </div>
+
+              {categories.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-[10px] text-gray-400 mb-2">Categories this role can access</label>
+                  <div className="max-h-[200px] overflow-y-auto border border-gray-200 dark:border-neutral-700 rounded-lg divide-y divide-gray-100 dark:divide-neutral-800">
+                    <CategoryCheckboxTree
+                      nodes={categories}
+                      selected={roleCategories}
+                      onToggle={toggleCategory}
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1">Selecting a category grants access to all scripts in it and its subcategories.</p>
+                </div>
+              )}
 
               <div className="flex items-center gap-2">
                 <button
