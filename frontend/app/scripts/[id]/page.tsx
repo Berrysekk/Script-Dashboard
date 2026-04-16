@@ -658,9 +658,16 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
 
       {!collapsed && (
         <>
-          <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-gray-50 dark:bg-neutral-950">
-            {!fullscreen && editor("500px")}
-          </div>
+          {!fullscreen && (
+            <div className="mt-3 border border-gray-200 dark:border-neutral-700 rounded overflow-hidden bg-gray-50 dark:bg-neutral-950">
+              {editor("500px")}
+            </div>
+          )}
+          {fullscreen && (
+            <div className="mt-3 border border-dashed border-gray-200 dark:border-neutral-700 rounded p-6 text-center text-xs text-gray-400 bg-gray-50/50 dark:bg-neutral-950/50">
+              Editor is open in fullsize view
+            </div>
+          )}
 
           {error && (
             <p className="mt-2 text-xs text-red-500">{error}</p>
@@ -678,6 +685,64 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
           </div>
         </>
       )}
+
+      <AnimatePresence>
+        {fullscreen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              onClick={() => setFullscreen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ type: "spring", stiffness: 500, damping: 35 }}
+              className="fixed inset-0 z-50 flex flex-col pointer-events-none"
+            >
+              <div
+                className="flex-1 flex flex-col m-4 bg-white dark:bg-neutral-900 rounded-xl overflow-hidden shadow-2xl pointer-events-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-neutral-700 shrink-0">
+                  <span className="text-sm font-mono text-gray-600 dark:text-gray-300 truncate">Code Editor</span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-[10px] text-gray-400">Ctrl+S / Cmd+S to save</span>
+                    <button
+                      onClick={save}
+                      disabled={saving}
+                      className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50"
+                    >
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                    {saved && <span className="text-xs text-green-500">Saved</span>}
+                    <button
+                      onClick={() => setFullscreen(false)}
+                      className="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 font-medium px-2"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                {/* Editor */}
+                <div className="flex-1 overflow-hidden bg-gray-50 dark:bg-neutral-950">
+                  {editor("100%")}
+                </div>
+
+                {error && (
+                  <p className="px-4 py-2 text-xs text-red-500 border-t border-gray-200 dark:border-neutral-700">{error}</p>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </section>
   );
 }
