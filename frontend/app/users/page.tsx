@@ -19,6 +19,7 @@ type Role = {
 type ScriptSummary = {
   id: string;
   name: string;
+  categories?: { id: string; name: string }[];
 };
 
 type CategoryNode = {
@@ -245,6 +246,14 @@ export default function UsersPage() {
     });
   };
 
+  // Scripts covered by selected categories (shown as checked + disabled)
+  const coveredByCategory = new Set<string>();
+  for (const s of scripts) {
+    if (s.categories?.some(c => roleCategories.has(c.id))) {
+      coveredByCategory.add(s.id);
+    }
+  }
+
   if (denied) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-sm text-gray-400">
@@ -455,20 +464,25 @@ export default function UsersPage() {
                   {scripts.length === 0 ? (
                     <p className="text-xs text-gray-400 p-3">No scripts available.</p>
                   ) : (
-                    scripts.map(s => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={roleScripts.has(s.id)}
-                          onChange={() => toggleScript(s.id)}
-                          className="rounded border-gray-300 dark:border-neutral-600"
-                        />
-                        <span className="text-xs">{s.name}</span>
-                      </label>
-                    ))
+                    scripts.map(s => {
+                      const covered = coveredByCategory.has(s.id);
+                      return (
+                        <label
+                          key={s.id}
+                          className={`flex items-center gap-3 px-3 py-2.5 ${covered ? "opacity-50 cursor-default" : "hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={covered || roleScripts.has(s.id)}
+                            onChange={() => { if (!covered) toggleScript(s.id); }}
+                            disabled={covered}
+                            className="rounded border-gray-300 dark:border-neutral-600"
+                          />
+                          <span className="text-xs">{s.name}</span>
+                          {covered && <span className="text-[10px] text-gray-400 ml-auto">via category</span>}
+                        </label>
+                      );
+                    })
                   )}
                 </div>
               </div>
