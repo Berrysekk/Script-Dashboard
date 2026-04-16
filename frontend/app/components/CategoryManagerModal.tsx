@@ -41,7 +41,7 @@ function TreeNode({
   const [expanded, setExpanded] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
-  const [showScripts, setShowScripts] = useState(false);
+  const [showScripts, setShowScripts] = useState(true);
 
   const assigned = scriptsByCat.get(node.id) ?? new Set();
 
