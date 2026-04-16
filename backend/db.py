@@ -16,6 +16,10 @@ async def init_db() -> None:
 
   async with aiosqlite.connect(DB_PATH) as db:
     db.row_factory = aiosqlite.Row
+    # SQLite disables FK enforcement per-connection by default. We rely on
+    # ON DELETE CASCADE (categories, role_categories) and ON DELETE SET NULL
+    # (scripts.category_id) to keep the authz model consistent on deletion.
+    await db.execute("PRAGMA foreign_keys = ON")
     await db.execute("""
       CREATE TABLE IF NOT EXISTS scripts (
         id           TEXT PRIMARY KEY,
@@ -131,4 +135,8 @@ async def init_db() -> None:
 async def get_db():
   async with aiosqlite.connect(DB_PATH) as db:
     db.row_factory = aiosqlite.Row
+    # Must be set per connection; otherwise ON DELETE CASCADE / SET NULL on
+    # categories / role_categories / scripts.category_id never fires and
+    # deleting a category leaves dangling authz rows.
+    await db.execute("PRAGMA foreign_keys = ON")
     yield db

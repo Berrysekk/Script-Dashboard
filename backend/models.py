@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -95,12 +95,12 @@ class UserResponse(BaseModel):
 
 
 class CategoryCreateRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     parent_id: Optional[str] = None
 
 
 class CategoryUpdateRequest(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     parent_id: Optional[str] = None
 
 
