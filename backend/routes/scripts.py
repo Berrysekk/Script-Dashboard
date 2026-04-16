@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
-from backend.deps import current_user
+from backend.deps import current_user, require_admin
 from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest
 
 router = APIRouter()
@@ -289,12 +289,21 @@ async def delete_script(script_id: str, user=Depends(current_user)):
 @router.put("/scripts/swap")
 async def swap_scripts(body: SwapRequest, user=Depends(current_user)):
     async with get_db() as db:
+        # Without an authorization check here, any authenticated user who
+        # guesses two script UUIDs could swap positions and categories of
+        # scripts they cannot see — an IDOR that also silently re-shares
+        # admin-only scripts into a category their own role is granted.
+        await _assert_can_access(db, body.script_id_a, user)
+        await _assert_can_access(db, body.script_id_b, user)
         cur_a = await db.execute("SELECT position, category_id FROM scripts WHERE id = ?", (body.script_id_a,))
         cur_b = await db.execute("SELECT position, category_id FROM scripts WHERE id = ?", (body.script_id_b,))
         row_a = await cur_a.fetchone()
         row_b = await cur_b.fetchone()
-        if not row_a or not row_b:
-            raise HTTPException(404, "Script not found")
+        # Cross-category swaps transfer category_id, which changes who else
+        # can see the script via role_categories — an authz-relevant change
+        # that belongs to admin.
+        if row_a["category_id"] != row_b["category_id"] and user["role"] != "admin":
+            raise HTTPException(403, "Cross-category swap requires admin")
         await db.execute(
             "UPDATE scripts SET position = ?, category_id = ? WHERE id = ?",
             (row_b["position"], row_b["category_id"], body.script_id_a),
@@ -308,9 +317,15 @@ async def swap_scripts(body: SwapRequest, user=Depends(current_user)):
 
 
 @router.put("/scripts/{script_id}/category")
-async def set_script_category(script_id: str, body: SetCategoryRequest, user=Depends(current_user)):
+async def set_script_category(script_id: str, body: SetCategoryRequest, admin=Depends(require_admin)):
+    # Category membership is an authorization grant — it controls which
+    # roles can see the script via role_categories. Allowing any user with
+    # read access to reassign categories would let them silently share
+    # scripts they don't own with other roles. Admin-only.
     async with get_db() as db:
-        await _assert_can_access(db, script_id, user)
+        cur = await db.execute("SELECT id FROM scripts WHERE id = ?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
         if body.category_id:
             cat_cur = await db.execute("SELECT id FROM categories WHERE id = ?", (body.category_id,))
             if not await cat_cur.fetchone():
@@ -421,9 +436,15 @@ async def download_output(script_id: str, filename: str, inline: bool = False, u
     output_file = _resolve_output_path(script_id, filename)
     if not output_file.exists() or not output_file.is_file():
         raise HTTPException(404, "Output file not found")
+    # A malicious script can drop an output file that renders as HTML/SVG
+    # with attacker-controlled JS. Served inline from /api, it executes in
+    # the app origin with the viewer's session cookie. CSP sandbox neuters
+    # script execution and same-origin access for the rendered document;
+    # we apply it to every output response defensively.
+    sandbox_headers = {"Content-Security-Policy": "sandbox"}
     if inline:
-        return FileResponse(output_file)
-    return FileResponse(output_file, filename=output_file.name)
+        return FileResponse(output_file, headers=sandbox_headers)
+    return FileResponse(output_file, filename=output_file.name, headers=sandbox_headers)
 
 
 @router.delete("/scripts/{script_id}/output/{filename:path}")

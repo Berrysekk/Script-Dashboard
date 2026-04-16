@@ -53,6 +53,10 @@ RUN mkdir -p /data /var/log/app \
 # Data volume for scripts, logs, and SQLite DB
 VOLUME ["/data"]
 EXPOSE 80
+
+# When fronted by HTTPS (recommended), set SESSION_COOKIE_SECURE=1 at run
+# time so the session cookie is only ever emitted over TLS. Left unset here
+# so the image still works for plain HTTP dev deployments on port 80.
 # supervisord starts as root (nginx master needs it to bind :80) and
 # drops privileges to appuser for FastAPI + Next.js, see supervisord.conf.
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

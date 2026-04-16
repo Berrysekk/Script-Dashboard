@@ -20,15 +20,25 @@ async def _get_depth(db, category_id: str) -> int:
     return depth
 
 
-async def _get_max_child_depth(db, category_id: str) -> int:
-    """Return the maximum depth among all descendants (0 if no children)."""
+async def _get_max_child_depth(db, category_id: str, _seen: set[str] | None = None) -> int:
+    """Return the maximum depth among all descendants (0 if no children).
+
+    Carries a visited set so a cycle in the DB (e.g. from a bad migration or
+    direct SQL) can't spin us into unbounded recursion.
+    """
+    if _seen is None:
+        _seen = {category_id}
     max_d = 0
     cur = await db.execute(
         "SELECT id FROM categories WHERE parent_id = ?", (category_id,)
     )
     children = await cur.fetchall()
     for child in children:
-        child_depth = 1 + await _get_max_child_depth(db, child["id"])
+        cid = child["id"]
+        if cid in _seen:
+            continue
+        _seen.add(cid)
+        child_depth = 1 + await _get_max_child_depth(db, cid, _seen)
         if child_depth > max_d:
             max_d = child_depth
     return max_d
@@ -137,15 +147,24 @@ async def reorder_categories(db, category_ids: list[str]) -> None:
 
 
 async def get_all_descendant_ids(db, cat_id: str) -> set[str]:
-    """Recursively collect all descendant category IDs."""
+    """Iteratively collect all descendant category IDs.
+
+    Uses a BFS frontier with a visited set so a cycle in the DB (e.g. from
+    a bad migration or direct SQL) can't spin us into unbounded recursion.
+    """
     descendants: set[str] = set()
-    cur = await db.execute(
-        "SELECT id FROM categories WHERE parent_id = ?", (cat_id,)
-    )
-    children = await cur.fetchall()
-    for child in children:
-        descendants.add(child["id"])
-        descendants |= await get_all_descendant_ids(db, child["id"])
+    frontier: list[str] = [cat_id]
+    while frontier:
+        current = frontier.pop()
+        cur = await db.execute(
+            "SELECT id FROM categories WHERE parent_id = ?", (current,)
+        )
+        for child in await cur.fetchall():
+            cid = child["id"]
+            if cid in descendants or cid == cat_id:
+                continue
+            descendants.add(cid)
+            frontier.append(cid)
     return descendants
 
 
