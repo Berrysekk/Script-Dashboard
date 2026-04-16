@@ -117,9 +117,9 @@ function CategorySection({
         onClick={() => setCollapsed(!collapsed)}
         className="flex items-center gap-2 mb-2 group"
       >
-        <span className="text-[10px] text-gray-400 transition-transform" style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>
-          ▼
-        </span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-gray-400 transition-transform duration-100 ${collapsed ? "-rotate-90" : ""}`}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
           {group.name}
         </span>
