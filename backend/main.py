@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from backend.db import init_db, get_db
-from backend.routes import auth, scripts, runs
+from backend.routes import auth, scripts, runs, categories
 from backend.services.log_manager import prune_old_runs
 from backend.services import auth as auth_service
 from backend.services import executor
@@ -112,3 +112,4 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(scripts.router, prefix="/api")
 app.include_router(runs.router, prefix="/api")
 app.include_router(runs.ws_router)
+app.include_router(categories.router, prefix="/api")
