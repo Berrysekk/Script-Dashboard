@@ -63,9 +63,11 @@ function TreeNode({
             onClick={() => setExpanded(!expanded)}
             className="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-gray-600 shrink-0"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-100 ${expanded ? "" : "-rotate-90"}`}>
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            {expanded ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg>
+            )}
           </button>
         ) : (
           <span className="w-4 h-4 flex items-center justify-center shrink-0">
