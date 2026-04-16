@@ -74,10 +74,12 @@ class UserCreateRequest(BaseModel):
 class RoleCreateRequest(BaseModel):
     name: str
     script_ids: list[str] = []
+    category_ids: list[str] = []
 
 
 class RoleUpdateRequest(BaseModel):
     script_ids: list[str] = []
+    category_ids: list[str] = []
 
 
 class UserResponse(BaseModel):
@@ -85,3 +87,21 @@ class UserResponse(BaseModel):
     username: str
     role: str
     created_at: Optional[datetime] = None
+
+
+class CategoryCreateRequest(BaseModel):
+    name: str
+    parent_id: Optional[str] = None
+
+
+class CategoryUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[str] = None
+
+
+class CategoryReorderRequest(BaseModel):
+    category_ids: list[str]
+
+
+class CategoryScriptsRequest(BaseModel):
+    script_ids: list[str]
