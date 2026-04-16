@@ -44,7 +44,7 @@ def _safe_zip_name(name: str) -> bool:
     return ".." not in parts
 
 
-def _row_to_meta(row) -> dict:
+def _row_to_meta(row, categories: list | None = None) -> dict:
     keys = row.keys()
     return {
         "id":            row["id"],
@@ -59,6 +59,7 @@ def _row_to_meta(row) -> dict:
         "last_run_at":   row["last_run_at"]  if "last_run_at"  in keys else None,
         "run_count":     row["run_count"]    if "run_count"    in keys else 0,
         "position":      row["position"]     if "position"     in keys else 0,
+        "categories":    categories if categories is not None else [],
     }
 
 
@@ -88,6 +89,11 @@ async def _assert_can_access(db, script_id: str, user) -> None:
         (user["role"], script_id),
     )
     if await cur2.fetchone():
+        return
+    # Check category-based access
+    from backend.services import categories as cat_service
+    accessible = await cat_service.get_scripts_accessible_via_categories(db, user["role"])
+    if script_id in accessible:
         return
     raise HTTPException(404, "Script not found")
 
@@ -180,6 +186,7 @@ async def upload_script(
 
 @router.get("/scripts")
 async def list_scripts(user=Depends(current_user)):
+    from backend.services import categories as cat_service
     base_sql = """
         SELECT s.*,
                r.status,
@@ -195,20 +202,38 @@ async def list_scripts(user=Depends(current_user)):
         if user["role"] == "admin":
             cur = await db.execute(base_sql + " ORDER BY s.position ASC, s.created_at DESC")
         else:
-            cur = await db.execute(
-                base_sql + """
-                WHERE s.owner_id = ?
-                   OR s.id IN (SELECT script_id FROM role_scripts WHERE role_name = ?)
-                ORDER BY s.position ASC, s.created_at DESC
-                """,
-                (user["id"], user["role"]),
-            )
+            cat_script_ids = await cat_service.get_scripts_accessible_via_categories(db, user["role"])
+            if cat_script_ids:
+                placeholders = ",".join("?" for _ in cat_script_ids)
+                cur = await db.execute(
+                    base_sql + f"""
+                    WHERE s.owner_id = ?
+                       OR s.id IN (SELECT script_id FROM role_scripts WHERE role_name = ?)
+                       OR s.id IN ({placeholders})
+                    ORDER BY s.position ASC, s.created_at DESC
+                    """,
+                    (user["id"], user["role"], *cat_script_ids),
+                )
+            else:
+                cur = await db.execute(
+                    base_sql + """
+                    WHERE s.owner_id = ?
+                       OR s.id IN (SELECT script_id FROM role_scripts WHERE role_name = ?)
+                    ORDER BY s.position ASC, s.created_at DESC
+                    """,
+                    (user["id"], user["role"]),
+                )
         rows = await cur.fetchall()
-    return [_row_to_meta(r) for r in rows]
+        result = []
+        for r in rows:
+            cats = await cat_service.get_script_category_ids(db, r["id"])
+            result.append(_row_to_meta(r, cats))
+    return result
 
 
 @router.get("/scripts/{script_id}")
 async def get_script(script_id: str, user=Depends(current_user)):
+    from backend.services import categories as cat_service
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
         cur = await db.execute("""
@@ -229,7 +254,8 @@ async def get_script(script_id: str, user=Depends(current_user)):
             (script_id,),
         )
         runs = [dict(r) for r in await cur.fetchall()]
-    return {**_row_to_meta(row), "runs": runs}
+        cats = await cat_service.get_script_category_ids(db, script_id)
+    return {**_row_to_meta(row, cats), "runs": runs}
 
 
 @router.patch("/scripts/{script_id}")
