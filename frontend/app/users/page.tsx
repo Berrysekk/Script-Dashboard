@@ -19,7 +19,7 @@ type Role = {
 type ScriptSummary = {
   id: string;
   name: string;
-  categories?: { id: string; name: string }[];
+  category?: { id: string; name: string } | null;
 };
 
 type CategoryNode = {
@@ -247,7 +247,7 @@ export default function UsersPage() {
   // Scripts covered by selected categories (shown as checked + disabled)
   const coveredByCategory = new Set<string>();
   for (const s of scripts) {
-    if (s.categories?.some(c => roleCategories.has(c.id))) {
+    if (s.category && roleCategories.has(s.category.id)) {
       coveredByCategory.add(s.id);
     }
   }

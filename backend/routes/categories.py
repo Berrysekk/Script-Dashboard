@@ -9,7 +9,6 @@ from backend.models import (
     CategoryCreateRequest,
     CategoryUpdateRequest,
     CategoryReorderRequest,
-    CategoryScriptsRequest,
 )
 from backend.services import categories as cat_service
 
@@ -63,11 +62,3 @@ async def reorder_categories(body: CategoryReorderRequest, admin=Depends(require
     return {"ok": True}
 
 
-@router.put("/categories/{cat_id}/scripts")
-async def set_category_scripts(cat_id: str, body: CategoryScriptsRequest, admin=Depends(require_admin)):
-    async with get_db() as db:
-        try:
-            await cat_service.set_category_scripts(db, cat_id, body.script_ids)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    return {"ok": True}

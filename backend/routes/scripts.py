@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
 from backend.deps import current_user
-from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, ReorderRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest
 
 router = APIRouter()
 
@@ -44,8 +44,10 @@ def _safe_zip_name(name: str) -> bool:
     return ".." not in parts
 
 
-def _row_to_meta(row, categories: list | None = None) -> dict:
+def _row_to_meta(row) -> dict:
     keys = row.keys()
+    cat_id = row["category_id"] if "category_id" in keys else None
+    cat_name = row["category_name"] if "category_name" in keys else None
     return {
         "id":            row["id"],
         "name":          row["name"],
@@ -59,7 +61,7 @@ def _row_to_meta(row, categories: list | None = None) -> dict:
         "last_run_at":   row["last_run_at"]  if "last_run_at"  in keys else None,
         "run_count":     row["run_count"]    if "run_count"    in keys else 0,
         "position":      row["position"]     if "position"     in keys else 0,
-        "categories":    categories if categories is not None else [],
+        "category":      {"id": cat_id, "name": cat_name} if cat_id else None,
     }
 
 
@@ -188,11 +190,12 @@ async def upload_script(
 async def list_scripts(user=Depends(current_user)):
     from backend.services import categories as cat_service
     base_sql = """
-        SELECT s.*,
+        SELECT s.*, c.name AS category_name,
                r.status,
                r.started_at AS last_run_at,
                (SELECT COUNT(*) FROM runs WHERE script_id = s.id) AS run_count
         FROM scripts s
+        LEFT JOIN categories c ON c.id = s.category_id
         LEFT JOIN runs r ON r.id = (
             SELECT id FROM runs WHERE script_id = s.id
             ORDER BY started_at DESC LIMIT 1
@@ -224,24 +227,20 @@ async def list_scripts(user=Depends(current_user)):
                     (user["id"], user["role"]),
                 )
         rows = await cur.fetchall()
-        result = []
-        for r in rows:
-            cats = await cat_service.get_script_category_ids(db, r["id"])
-            result.append(_row_to_meta(r, cats))
-    return result
+        return [_row_to_meta(r) for r in rows]
 
 
 @router.get("/scripts/{script_id}")
 async def get_script(script_id: str, user=Depends(current_user)):
-    from backend.services import categories as cat_service
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
         cur = await db.execute("""
-            SELECT s.*,
+            SELECT s.*, c.name AS category_name,
                    r.status,
                    r.started_at AS last_run_at,
                    (SELECT COUNT(*) FROM runs WHERE script_id = s.id) AS run_count
             FROM scripts s
+            LEFT JOIN categories c ON c.id = s.category_id
             LEFT JOIN runs r ON r.id = (
                 SELECT id FROM runs WHERE script_id = s.id
                 ORDER BY started_at DESC LIMIT 1
@@ -254,8 +253,7 @@ async def get_script(script_id: str, user=Depends(current_user)):
             (script_id,),
         )
         runs = [dict(r) for r in await cur.fetchall()]
-        cats = await cat_service.get_script_category_ids(db, script_id)
-    return {**_row_to_meta(row, cats), "runs": runs}
+    return {**_row_to_meta(row), "runs": runs}
 
 
 @router.patch("/scripts/{script_id}")
@@ -288,14 +286,39 @@ async def delete_script(script_id: str, user=Depends(current_user)):
     return {"ok": True}
 
 
-@router.put("/scripts/reorder")
-async def reorder_scripts(body: ReorderRequest, user=Depends(current_user)):
+@router.put("/scripts/swap")
+async def swap_scripts(body: SwapRequest, user=Depends(current_user)):
     async with get_db() as db:
-        for idx, script_id in enumerate(body.script_ids):
-            await db.execute(
-                "UPDATE scripts SET position = ? WHERE id = ?",
-                (idx, script_id),
-            )
+        cur_a = await db.execute("SELECT position, category_id FROM scripts WHERE id = ?", (body.script_id_a,))
+        cur_b = await db.execute("SELECT position, category_id FROM scripts WHERE id = ?", (body.script_id_b,))
+        row_a = await cur_a.fetchone()
+        row_b = await cur_b.fetchone()
+        if not row_a or not row_b:
+            raise HTTPException(404, "Script not found")
+        await db.execute(
+            "UPDATE scripts SET position = ?, category_id = ? WHERE id = ?",
+            (row_b["position"], row_b["category_id"], body.script_id_a),
+        )
+        await db.execute(
+            "UPDATE scripts SET position = ?, category_id = ? WHERE id = ?",
+            (row_a["position"], row_a["category_id"], body.script_id_b),
+        )
+        await db.commit()
+    return {"ok": True}
+
+
+@router.put("/scripts/{script_id}/category")
+async def set_script_category(script_id: str, body: SetCategoryRequest, user=Depends(current_user)):
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        if body.category_id:
+            cat_cur = await db.execute("SELECT id FROM categories WHERE id = ?", (body.category_id,))
+            if not await cat_cur.fetchone():
+                raise HTTPException(404, "Category not found")
+        await db.execute(
+            "UPDATE scripts SET category_id = ? WHERE id = ?",
+            (body.category_id, script_id),
+        )
         await db.commit()
     return {"ok": True}
 

@@ -1,6 +1,20 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type CategoryNode = {
   id: string;
@@ -23,7 +37,7 @@ function TreeNode({
   node,
   depth,
   scripts,
-  scriptsByCat,
+  scriptCategoryMap,
   onAdd,
   onRename,
   onDelete,
@@ -32,18 +46,26 @@ function TreeNode({
   node: CategoryNode;
   depth: number;
   scripts: ScriptSummary[];
-  scriptsByCat: Map<string, Set<string>>;
+  scriptCategoryMap: Map<string, string>;
   onAdd: (parentId: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onToggleScript: (catId: string, scriptId: string, assigned: boolean) => void;
+  onToggleScript: (scriptId: string, categoryId: string | null) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
   const [showScripts, setShowScripts] = useState(true);
 
-  const assigned = scriptsByCat.get(node.id) ?? new Set();
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: node.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
 
   const handleRename = () => {
     if (editName.trim() && editName.trim() !== node.name) {
@@ -53,8 +75,22 @@ function TreeNode({
   };
 
   return (
-    <div>
+    <div ref={setNodeRef} style={style}>
       <div className="flex items-center gap-1.5 group py-1" style={{ paddingLeft: depth * 20 }}>
+        {/* Drag handle */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="w-4 h-4 flex items-center justify-center text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0"
+          title="Drag to reorder"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3" r="1.5"/><circle cx="11" cy="3" r="1.5"/>
+            <circle cx="5" cy="8" r="1.5"/><circle cx="11" cy="8" r="1.5"/>
+            <circle cx="5" cy="13" r="1.5"/><circle cx="11" cy="13" r="1.5"/>
+          </svg>
+        </button>
+
         {depth > 0 && (
           <span className="text-gray-300 dark:text-neutral-600 text-xs select-none shrink-0">&#x251C;</span>
         )}
@@ -96,7 +132,9 @@ function TreeNode({
           </span>
         )}
 
-        <span className="text-[10px] text-gray-400">({assigned.size})</span>
+        <span className="text-[10px] text-gray-400">
+          ({scripts.filter(s => scriptCategoryMap.get(s.id) === node.id).length})
+        </span>
 
         <div className="flex gap-0.5 ml-auto">
           <button
@@ -140,20 +178,32 @@ function TreeNode({
             className="overflow-hidden"
           >
             <div style={{ paddingLeft: depth * 20 + 24 }} className="mb-1">
-              {scripts.map((s) => (
-                <label
-                  key={s.id}
-                  className="flex items-center gap-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={assigned.has(s.id)}
-                    onChange={() => onToggleScript(node.id, s.id, assigned.has(s.id))}
-                    className="rounded border-gray-300 dark:border-neutral-600"
-                  />
-                  {s.name}
-                </label>
-              ))}
+              {scripts.map((s) => {
+                const currentCat = scriptCategoryMap.get(s.id);
+                const isAssignedHere = currentCat === node.id;
+                const isAssignedElsewhere = currentCat && currentCat !== node.id;
+                return (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isAssignedHere}
+                      onChange={() => onToggleScript(s.id, isAssignedHere ? null : node.id)}
+                      className="rounded border-gray-300 dark:border-neutral-600"
+                    />
+                    <span className={isAssignedElsewhere ? "text-gray-300 dark:text-neutral-600" : ""}>
+                      {s.name}
+                    </span>
+                    {isAssignedElsewhere && (
+                      <span className="text-[10px] text-gray-300 dark:text-neutral-600 italic">
+                        (in other category)
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
             </div>
           </motion.div>
         )}
@@ -161,25 +211,27 @@ function TreeNode({
 
       {/* Children */}
       {expanded && node.children.length > 0 && (
-        <div className="relative" style={{ marginLeft: depth > 0 ? 0 : 0 }}>
-          <div
-            className="absolute top-0 bottom-0 border-l border-gray-200 dark:border-neutral-700"
-            style={{ left: depth * 20 + 8 }}
-          />
-          {node.children.map((child) => (
-            <TreeNode
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              scripts={scripts}
-              scriptsByCat={scriptsByCat}
-              onAdd={onAdd}
-              onRename={onRename}
-              onDelete={onDelete}
-              onToggleScript={onToggleScript}
+        <SortableContext items={node.children.map(c => c.id)} strategy={verticalListSortingStrategy}>
+          <div className="relative" style={{ marginLeft: depth > 0 ? 0 : 0 }}>
+            <div
+              className="absolute top-0 bottom-0 border-l border-gray-200 dark:border-neutral-700"
+              style={{ left: depth * 20 + 8 }}
             />
-          ))}
-        </div>
+            {node.children.map((child) => (
+              <TreeNode
+                key={child.id}
+                node={child}
+                depth={depth + 1}
+                scripts={scripts}
+                scriptCategoryMap={scriptCategoryMap}
+                onAdd={onAdd}
+                onRename={onRename}
+                onDelete={onDelete}
+                onToggleScript={onToggleScript}
+              />
+            ))}
+          </div>
+        </SortableContext>
       )}
     </div>
   );
@@ -188,9 +240,13 @@ function TreeNode({
 export default function CategoryManagerModal({ onClose }: Props) {
   const [tree, setTree] = useState<CategoryNode[]>([]);
   const [scripts, setScripts] = useState<ScriptSummary[]>([]);
-  const [scriptsByCat, setScriptsByCat] = useState<Map<string, Set<string>>>(new Map());
+  const [scriptCategoryMap, setScriptCategoryMap] = useState<Map<string, string>>(new Map());
   const [newName, setNewName] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
 
   const loadData = useCallback(async () => {
     const [catRes, scriptRes] = await Promise.all([
@@ -201,15 +257,13 @@ export default function CategoryManagerModal({ onClose }: Props) {
     if (scriptRes.ok) {
       const data = await scriptRes.json();
       setScripts(data.map((s: any) => ({ id: s.id, name: s.name })));
-      // Build scriptsByCat map from script.categories
-      const map = new Map<string, Set<string>>();
+      const map = new Map<string, string>();
       for (const s of data) {
-        for (const cat of s.categories ?? []) {
-          if (!map.has(cat.id)) map.set(cat.id, new Set());
-          map.get(cat.id)!.add(s.id);
+        if (s.category) {
+          map.set(s.id, s.category.id);
         }
       }
-      setScriptsByCat(map);
+      setScriptCategoryMap(map);
     }
     setLoading(false);
   }, []);
@@ -245,18 +299,45 @@ export default function CategoryManagerModal({ onClose }: Props) {
     loadData();
   };
 
-  const toggleScript = async (catId: string, scriptId: string, wasAssigned: boolean) => {
-    const current = scriptsByCat.get(catId) ?? new Set();
-    const updated = new Set(current);
-    if (wasAssigned) {
-      updated.delete(scriptId);
-    } else {
-      updated.add(scriptId);
+  const findSiblingsAndParent = (nodes: CategoryNode[], targetId: string, parentId: string | null): { siblings: CategoryNode[]; parentId: string | null } | null => {
+    for (const n of nodes) {
+      if (n.id === targetId) return { siblings: nodes, parentId };
     }
-    await fetch(`/api/categories/${catId}/scripts`, {
+    for (const n of nodes) {
+      const found = findSiblingsAndParent(n.children, targetId, n.id);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const handleCategoryDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const result = findSiblingsAndParent(tree, active.id as string, null);
+    if (!result) return;
+    const { siblings } = result;
+
+    const idxA = siblings.findIndex(s => s.id === active.id);
+    const idxB = siblings.findIndex(s => s.id === over.id);
+    if (idxA === -1 || idxB === -1) return;
+
+    const reordered = [...siblings];
+    [reordered[idxA], reordered[idxB]] = [reordered[idxB], reordered[idxA]];
+
+    await fetch("/api/categories/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script_ids: [...updated] }),
+      body: JSON.stringify({ category_ids: reordered.map(s => s.id) }),
+    });
+    loadData();
+  };
+
+  const toggleScript = async (scriptId: string, categoryId: string | null) => {
+    await fetch(`/api/scripts/${scriptId}/category`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category_id: categoryId }),
     });
     loadData();
     window.dispatchEvent(new Event("scripts-changed"));
@@ -290,24 +371,30 @@ export default function CategoryManagerModal({ onClose }: Props) {
           {loading ? (
             <p className="text-xs text-gray-400">Loading...</p>
           ) : (
-            <>
-              {tree.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  depth={0}
-                  scripts={scripts}
-                  scriptsByCat={scriptsByCat}
-                  onAdd={addCategory}
-                  onRename={renameCategory}
-                  onDelete={deleteCategory}
-                  onToggleScript={toggleScript}
-                />
-              ))}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleCategoryDragEnd}
+            >
+              <SortableContext items={tree.map(n => n.id)} strategy={verticalListSortingStrategy}>
+                {tree.map((node) => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    scripts={scripts}
+                    scriptCategoryMap={scriptCategoryMap}
+                    onAdd={addCategory}
+                    onRename={renameCategory}
+                    onDelete={deleteCategory}
+                    onToggleScript={toggleScript}
+                  />
+                ))}
+              </SortableContext>
               {tree.length === 0 && (
                 <p className="text-xs text-gray-400 py-2">No categories yet.</p>
               )}
-            </>
+            </DndContext>
           )}
         </div>
 

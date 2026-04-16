@@ -45,8 +45,13 @@ class RequirementsUpdateRequest(BaseModel):
     requirements: str
 
 
-class ReorderRequest(BaseModel):
-    script_ids: list[str]
+class SwapRequest(BaseModel):
+    script_id_a: str
+    script_id_b: str
+
+
+class SetCategoryRequest(BaseModel):
+    category_id: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -103,5 +108,3 @@ class CategoryReorderRequest(BaseModel):
     category_ids: list[str]
 
 
-class CategoryScriptsRequest(BaseModel):
-    script_ids: list[str]

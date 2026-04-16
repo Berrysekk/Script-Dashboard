@@ -8,7 +8,7 @@ export type Script = {
   id: string; name: string; filename: string; description?: string;
   status?: string; loop_enabled: boolean; loop_interval?: string;
   last_run_at?: string; run_count: number; position?: number;
-  categories?: { id: string; name: string }[];
+  category?: { id: string; name: string } | null;
 };
 
 type Props = {
