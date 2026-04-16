@@ -264,6 +264,8 @@ export default function Dashboard() {
     if (idxA === -1 || idxB === -1) return;
 
     const swapped = [...scripts];
+    swapped[idxA] = { ...scripts[idxA], category: scripts[idxB].category };
+    swapped[idxB] = { ...scripts[idxB], category: scripts[idxA].category };
     [swapped[idxA], swapped[idxB]] = [swapped[idxB], swapped[idxA]];
     setScripts(swapped);
 

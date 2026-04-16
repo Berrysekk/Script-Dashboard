@@ -94,6 +94,15 @@ class UserResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class ScriptVariableRequest(BaseModel):
+    key: str
+    value: str = ""
+
+
+class ScriptVariablesBulkRequest(BaseModel):
+    variables: list[ScriptVariableRequest]
+
+
 class CategoryCreateRequest(BaseModel):
     name: str
     parent_id: Optional[str] = None

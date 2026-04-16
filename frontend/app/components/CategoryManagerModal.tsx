@@ -1,13 +1,17 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import {
   DndContext,
   closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
+  useDraggable,
+  useDroppable,
   DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -33,6 +37,38 @@ type Props = {
   onClose: () => void;
 };
 
+const SCRIPT_PREFIX = "script:";
+const UNCATEGORIZED_ID = "__uncategorized__";
+
+function DraggableScript({ script }: { script: ScriptSummary }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: SCRIPT_PREFIX + script.id,
+    data: { type: "script", scriptId: script.id },
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="flex items-center gap-2 py-1 px-2 text-[11px] text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-neutral-800 rounded cursor-grab active:cursor-grabbing select-none"
+    >
+      <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor" className="text-gray-300 shrink-0">
+        <circle cx="5" cy="3" r="1.5" /><circle cx="11" cy="3" r="1.5" />
+        <circle cx="5" cy="8" r="1.5" /><circle cx="11" cy="8" r="1.5" />
+        <circle cx="5" cy="13" r="1.5" /><circle cx="11" cy="13" r="1.5" />
+      </svg>
+      <span className="truncate">{script.name}</span>
+    </div>
+  );
+}
+
 function TreeNode({
   node,
   depth,
@@ -41,7 +77,6 @@ function TreeNode({
   onAdd,
   onRename,
   onDelete,
-  onToggleScript,
 }: {
   node: CategoryNode;
   depth: number;
@@ -50,16 +85,24 @@ function TreeNode({
   onAdd: (parentId: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onToggleScript: (scriptId: string, categoryId: string | null) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
-  const [showScripts, setShowScripts] = useState(true);
 
   const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: node.id });
+    attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging,
+  } = useSortable({ id: node.id, data: { type: "category" } });
+
+  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+    id: node.id,
+    data: { type: "category-drop", categoryId: node.id },
+  });
+
+  const setRef = (el: HTMLElement | null) => {
+    setSortableRef(el);
+    setDroppableRef(el);
+  };
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -74,9 +117,14 @@ function TreeNode({
     setEditing(false);
   };
 
+  const scriptsInCategory = scripts.filter((s) => scriptCategoryMap.get(s.id) === node.id);
+
   return (
-    <div ref={setNodeRef} style={style}>
-      <div className="flex items-center gap-1.5 group py-1" style={{ paddingLeft: depth * 20 }}>
+    <div ref={setRef} style={style}>
+      <div
+        className={`flex items-center gap-1.5 group py-1 rounded ${isOver ? "bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-400" : ""}`}
+        style={{ paddingLeft: depth * 20 }}
+      >
         {/* Drag handle */}
         <button
           {...attributes}
@@ -133,21 +181,10 @@ function TreeNode({
         )}
 
         <span className="text-[10px] text-gray-400">
-          ({scripts.filter(s => scriptCategoryMap.get(s.id) === node.id).length})
+          ({scriptsInCategory.length})
         </span>
 
         <div className="flex gap-0.5 ml-auto">
-          <button
-            onClick={() => setShowScripts(!showScripts)}
-            className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-            title="Assign scripts"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {showScripts
-                ? <polyline points="6 9 12 15 18 9" />
-                : <polyline points="6 15 12 9 18 15" />}
-            </svg>
-          </button>
           {depth < 4 && (
             <button
               onClick={() => onAdd(node.id)}
@@ -167,52 +204,25 @@ function TreeNode({
         </div>
       </div>
 
-      {/* Script assignment */}
-      <AnimatePresence>
-        {showScripts && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.1 }}
-            className="overflow-hidden"
-          >
-            <div style={{ paddingLeft: depth * 20 + 24 }} className="mb-1">
-              {scripts.map((s) => {
-                const currentCat = scriptCategoryMap.get(s.id);
-                const isAssignedHere = currentCat === node.id;
-                const isAssignedElsewhere = currentCat && currentCat !== node.id;
-                return (
-                  <label
-                    key={s.id}
-                    className="flex items-center gap-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isAssignedHere}
-                      onChange={() => onToggleScript(s.id, isAssignedHere ? null : node.id)}
-                      className="rounded border-gray-300 dark:border-neutral-600"
-                    />
-                    <span className={isAssignedElsewhere ? "text-gray-300 dark:text-neutral-600" : ""}>
-                      {s.name}
-                    </span>
-                    {isAssignedElsewhere && (
-                      <span className="text-[10px] text-gray-300 dark:text-neutral-600 italic">
-                        (in other category)
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
+      {/* Scripts inside this category */}
+      {expanded && (
+        <div style={{ paddingLeft: depth * 20 + 28 }} className="mb-1">
+          {scriptsInCategory.length === 0 ? (
+            <div className="text-[10px] text-gray-300 dark:text-neutral-600 italic py-1 px-2">
+              Drop scripts here
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : (
+            scriptsInCategory.map((s) => (
+              <DraggableScript key={s.id} script={s} />
+            ))
+          )}
+        </div>
+      )}
 
       {/* Children */}
       {expanded && node.children.length > 0 && (
         <SortableContext items={node.children.map(c => c.id)} strategy={verticalListSortingStrategy}>
-          <div className="relative" style={{ marginLeft: depth > 0 ? 0 : 0 }}>
+          <div className="relative">
             <div
               className="absolute top-0 bottom-0 border-l border-gray-200 dark:border-neutral-700"
               style={{ left: depth * 20 + 8 }}
@@ -227,11 +237,59 @@ function TreeNode({
                 onAdd={onAdd}
                 onRename={onRename}
                 onDelete={onDelete}
-                onToggleScript={onToggleScript}
               />
             ))}
           </div>
         </SortableContext>
+      )}
+    </div>
+  );
+}
+
+function UncategorizedSection({
+  uncategorizedScripts,
+}: {
+  uncategorizedScripts: ScriptSummary[];
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const { setNodeRef, isOver } = useDroppable({
+    id: UNCATEGORIZED_ID,
+    data: { type: "category-drop", categoryId: null },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`mb-2 rounded ${isOver ? "bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-400" : ""}`}
+    >
+      <div className="flex items-center gap-1.5 py-1 px-1">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-600 shrink-0"
+        >
+          {expanded ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 15 12 9 18 15" /></svg>
+          )}
+        </button>
+        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+          Uncategorized
+        </span>
+        <span className="text-[10px] text-gray-400">({uncategorizedScripts.length})</span>
+      </div>
+      {expanded && (
+        <div className="pl-6 pb-1">
+          {uncategorizedScripts.length === 0 ? (
+            <div className="text-[10px] text-gray-300 dark:text-neutral-600 italic py-1 px-2">
+              Drop scripts here to remove them from a category
+            </div>
+          ) : (
+            uncategorizedScripts.map((s) => (
+              <DraggableScript key={s.id} script={s} />
+            ))
+          )}
+        </div>
       )}
     </div>
   );
@@ -243,29 +301,33 @@ export default function CategoryManagerModal({ onClose }: Props) {
   const [scriptCategoryMap, setScriptCategoryMap] = useState<Map<string, string>>(new Map());
   const [newName, setNewName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeDragName, setActiveDragName] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
   const loadData = useCallback(async () => {
-    const [catRes, scriptRes] = await Promise.all([
-      fetch("/api/categories"),
-      fetch("/api/scripts"),
-    ]);
-    if (catRes.ok) setTree(await catRes.json());
-    if (scriptRes.ok) {
-      const data = await scriptRes.json();
-      setScripts(data.map((s: any) => ({ id: s.id, name: s.name })));
-      const map = new Map<string, string>();
-      for (const s of data) {
-        if (s.category) {
-          map.set(s.id, s.category.id);
+    try {
+      const [catRes, scriptRes] = await Promise.all([
+        fetch("/api/categories"),
+        fetch("/api/scripts"),
+      ]);
+      if (catRes.ok) setTree(await catRes.json());
+      if (scriptRes.ok) {
+        const data = await scriptRes.json();
+        setScripts(data.map((s: any) => ({ id: s.id, name: s.name })));
+        const map = new Map<string, string>();
+        for (const s of data) {
+          if (s.category) {
+            map.set(s.id, s.category.id);
+          }
         }
+        setScriptCategoryMap(map);
       }
-      setScriptCategoryMap(map);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -310,16 +372,72 @@ export default function CategoryManagerModal({ onClose }: Props) {
     return null;
   };
 
-  const handleCategoryDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  const reassignScript = async (scriptId: string, categoryId: string | null) => {
+    // Optimistic update
+    setScriptCategoryMap((prev) => {
+      const next = new Map(prev);
+      if (categoryId === null) next.delete(scriptId);
+      else next.set(scriptId, categoryId);
+      return next;
+    });
+    try {
+      await fetch(`/api/scripts/${scriptId}/category`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category_id: categoryId }),
+      });
+      window.dispatchEvent(new Event("scripts-changed"));
+    } catch {
+      loadData();
+    }
+  };
 
-    const result = findSiblingsAndParent(tree, active.id as string, null);
+  const handleDragStart = (event: DragStartEvent) => {
+    const id = event.active.id as string;
+    if (id.startsWith(SCRIPT_PREFIX)) {
+      const scriptId = id.slice(SCRIPT_PREFIX.length);
+      const s = scripts.find((x) => x.id === scriptId);
+      setActiveDragName(s?.name ?? null);
+    } else {
+      setActiveDragName(null);
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    setActiveDragName(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // Script drop
+    if (activeId.startsWith(SCRIPT_PREFIX)) {
+      const scriptId = activeId.slice(SCRIPT_PREFIX.length);
+      let targetCategoryId: string | null;
+      if (overId === UNCATEGORIZED_ID) {
+        targetCategoryId = null;
+      } else if (overId.startsWith(SCRIPT_PREFIX)) {
+        // dropped onto another script — use that script's current category
+        const otherScriptId = overId.slice(SCRIPT_PREFIX.length);
+        targetCategoryId = scriptCategoryMap.get(otherScriptId) ?? null;
+      } else {
+        targetCategoryId = overId;
+      }
+      const current = scriptCategoryMap.get(scriptId) ?? null;
+      if (current === targetCategoryId) return;
+      await reassignScript(scriptId, targetCategoryId);
+      return;
+    }
+
+    // Category reordering (existing behavior)
+    if (activeId === overId) return;
+    const result = findSiblingsAndParent(tree, activeId, null);
     if (!result) return;
     const { siblings } = result;
 
-    const idxA = siblings.findIndex(s => s.id === active.id);
-    const idxB = siblings.findIndex(s => s.id === over.id);
+    const idxA = siblings.findIndex((s) => s.id === activeId);
+    const idxB = siblings.findIndex((s) => s.id === overId);
     if (idxA === -1 || idxB === -1) return;
 
     const reordered = [...siblings];
@@ -328,20 +446,12 @@ export default function CategoryManagerModal({ onClose }: Props) {
     await fetch("/api/categories/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category_ids: reordered.map(s => s.id) }),
+      body: JSON.stringify({ category_ids: reordered.map((s) => s.id) }),
     });
     loadData();
   };
 
-  const toggleScript = async (scriptId: string, categoryId: string | null) => {
-    await fetch(`/api/scripts/${scriptId}/category`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category_id: categoryId }),
-    });
-    loadData();
-    window.dispatchEvent(new Event("scripts-changed"));
-  };
+  const uncategorizedScripts = scripts.filter((s) => !scriptCategoryMap.has(s.id));
 
   return (
     <motion.div
@@ -374,9 +484,12 @@ export default function CategoryManagerModal({ onClose }: Props) {
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
-              onDragEnd={handleCategoryDragEnd}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
             >
-              <SortableContext items={tree.map(n => n.id)} strategy={verticalListSortingStrategy}>
+              <UncategorizedSection uncategorizedScripts={uncategorizedScripts} />
+
+              <SortableContext items={tree.map((n) => n.id)} strategy={verticalListSortingStrategy}>
                 {tree.map((node) => (
                   <TreeNode
                     key={node.id}
@@ -387,13 +500,20 @@ export default function CategoryManagerModal({ onClose }: Props) {
                     onAdd={addCategory}
                     onRename={renameCategory}
                     onDelete={deleteCategory}
-                    onToggleScript={toggleScript}
                   />
                 ))}
               </SortableContext>
               {tree.length === 0 && (
                 <p className="text-xs text-gray-400 py-2">No categories yet.</p>
               )}
+
+              <DragOverlay>
+                {activeDragName && (
+                  <div className="flex items-center gap-2 py-1 px-2 text-[11px] text-gray-700 dark:text-gray-200 bg-white dark:bg-neutral-800 border border-blue-400 rounded shadow-lg">
+                    <span className="truncate">{activeDragName}</span>
+                  </div>
+                )}
+              </DragOverlay>
             </DndContext>
           )}
         </div>
