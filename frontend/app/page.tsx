@@ -20,6 +20,7 @@ import { motion, AnimatePresence } from "motion/react";
 import ScriptCard, { Script } from "./components/ScriptCard";
 import UploadModal from "./components/UploadModal";
 import LogDrawer   from "./components/LogDrawer";
+import CategoryManagerModal from "./components/CategoryManagerModal";
 
 type FilterView = "all" | "running" | "idle";
 
@@ -95,12 +96,71 @@ function StaticScriptCard({
   );
 }
 
+function CategorySection({
+  group,
+  onRun,
+  onLoop,
+  onStop,
+  onLogs,
+}: {
+  group: { id: string | null; name: string; scripts: Script[] };
+  onRun: (id: string) => Promise<void>;
+  onLoop: (id: string, interval: string) => Promise<void>;
+  onStop: (id: string) => Promise<void>;
+  onLogs: (s: Script) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div>
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center gap-2 mb-2 group"
+      >
+        <span className="text-[10px] text-gray-400 transition-transform" style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>
+          ▼
+        </span>
+        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          {group.name}
+        </span>
+        <span className="text-[10px] text-gray-400">({group.scripts.length})</span>
+      </button>
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.12 }}
+            className="overflow-hidden"
+          >
+            <div className="grid grid-cols-3 gap-3">
+              {group.scripts.map((s, i) => (
+                <StaticScriptCard
+                  key={s.id}
+                  script={s}
+                  onRun={onRun}
+                  onLoop={onLoop}
+                  onStop={onStop}
+                  onLogs={() => onLogs(s)}
+                  index={i}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [scripts, setScripts]       = useState<Script[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [logsFor, setLogsFor]       = useState<Script | null>(null);
   const [filter, setFilter]         = useState<FilterView>("all");
   const [activeId, setActiveId]     = useState<string | null>(null);
+  const [showCategories, setShowCategories] = useState(false);
   const orderRef = useRef<string[] | null>(null);
   const hasLoaded = useRef(false);
 
@@ -188,6 +248,47 @@ export default function Dashboard() {
   const activeScript = activeId ? scripts.find(s => s.id === activeId) : null;
   const isDraggable = filter === "all";
 
+  // Group scripts by category for display
+  type CategoryGroup = {
+    id: string | null;
+    name: string;
+    scripts: Script[];
+  };
+
+  const groupedScripts = (() => {
+    const groups: CategoryGroup[] = [];
+    const seenCats = new Set<string>();
+    const uncategorized: Script[] = [];
+
+    // Collect all unique categories in order
+    for (const s of filteredScripts) {
+      if (!s.categories?.length) {
+        uncategorized.push(s);
+        continue;
+      }
+      for (const cat of s.categories) {
+        if (!seenCats.has(cat.id)) {
+          seenCats.add(cat.id);
+          groups.push({ id: cat.id, name: cat.name, scripts: [] });
+        }
+      }
+    }
+    // Assign scripts to their categories
+    for (const s of filteredScripts) {
+      if (!s.categories?.length) continue;
+      for (const cat of s.categories) {
+        const g = groups.find(g => g.id === cat.id);
+        if (g) g.scripts.push(s);
+      }
+    }
+    if (uncategorized.length > 0) {
+      groups.push({ id: null, name: "Uncategorized", scripts: uncategorized });
+    }
+    return groups;
+  })();
+
+  const hasCategories = groupedScripts.length > 1 || (groupedScripts.length === 1 && groupedScripts[0]?.id !== null);
+
   return (
     <div className="p-5">
       {/* Filter bar */}
@@ -219,14 +320,25 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-        <motion.button
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={() => setShowUpload(true)}
-          className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded font-medium"
-        >
-          + Add Script
-        </motion.button>
+        <div className="flex items-center gap-2">
+          <motion.button
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowCategories(true)}
+            className="text-xs border border-gray-200 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800 px-3 py-1.5 rounded font-medium"
+            title="Manage categories"
+          >
+            Categories
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowUpload(true)}
+            className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded font-medium"
+          >
+            + Add Script
+          </motion.button>
+        </div>
       </motion.div>
 
       {/* Card grid */}
@@ -241,6 +353,19 @@ export default function Dashboard() {
           >
             No scripts match this filter.
           </motion.p>
+        ) : hasCategories ? (
+          <div className="space-y-4">
+            {groupedScripts.map((group) => (
+              <CategorySection
+                key={group.id ?? "uncategorized"}
+                group={group}
+                onRun={handleRun}
+                onLoop={handleLoop}
+                onStop={handleStop}
+                onLogs={setLogsFor}
+              />
+            ))}
+          </div>
         ) : isDraggable ? (
           <DndContext
             sensors={sensors}
@@ -304,6 +429,9 @@ export default function Dashboard() {
       </AnimatePresence>
       <AnimatePresence>
         {logsFor && <LogDrawer scriptId={logsFor.id} scriptName={logsFor.name} onClose={() => setLogsFor(null)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showCategories && <CategoryManagerModal onClose={() => { setShowCategories(false); refresh(); }} />}
       </AnimatePresence>
     </div>
   );
