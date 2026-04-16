@@ -53,17 +53,24 @@ function TreeNode({
   };
 
   return (
-    <div style={{ marginLeft: depth > 0 ? 16 : 0 }}>
-      <div className="flex items-center gap-1.5 group py-1">
+    <div>
+      <div className="flex items-center gap-1.5 group py-1" style={{ paddingLeft: depth * 20 }}>
+        {depth > 0 && (
+          <span className="text-gray-300 dark:text-neutral-600 text-xs select-none shrink-0">&#x251C;</span>
+        )}
         {node.children.length > 0 ? (
           <button
             onClick={() => setExpanded(!expanded)}
             className="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-gray-600 shrink-0"
           >
-            {expanded ? "▼" : "▶"}
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" className={`transition-transform duration-100 ${expanded ? "rotate-90" : ""}`}>
+              <path d="M3 1.5L7 5L3 8.5z" />
+            </svg>
           </button>
         ) : (
-          <span className="w-4" />
+          <span className="w-4 h-4 flex items-center justify-center shrink-0">
+            <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-neutral-600" />
+          </span>
         )}
 
         {editing ? (
@@ -116,7 +123,7 @@ function TreeNode({
         </div>
       </div>
 
-      {/* Script assignment dropdown */}
+      {/* Script assignment */}
       <AnimatePresence>
         {showScripts && (
           <motion.div
@@ -126,11 +133,11 @@ function TreeNode({
             transition={{ duration: 0.1 }}
             className="overflow-hidden"
           >
-            <div className="ml-5 mb-2 border border-gray-200 dark:border-neutral-700 rounded max-h-40 overflow-y-auto">
+            <div style={{ paddingLeft: depth * 20 + 24 }} className="mb-1">
               {scripts.map((s) => (
                 <label
                   key={s.id}
-                  className="flex items-center gap-2 px-2 py-1 text-[11px] hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
+                  className="flex items-center gap-2 py-0.5 text-[11px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"
                 >
                   <input
                     type="checkbox"
@@ -147,19 +154,27 @@ function TreeNode({
       </AnimatePresence>
 
       {/* Children */}
-      {expanded && node.children.map((child) => (
-        <TreeNode
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          scripts={scripts}
-          scriptsByCat={scriptsByCat}
-          onAdd={onAdd}
-          onRename={onRename}
-          onDelete={onDelete}
-          onToggleScript={onToggleScript}
-        />
-      ))}
+      {expanded && node.children.length > 0 && (
+        <div className="relative" style={{ marginLeft: depth > 0 ? 0 : 0 }}>
+          <div
+            className="absolute top-0 bottom-0 border-l border-gray-200 dark:border-neutral-700"
+            style={{ left: depth * 20 + 8 }}
+          />
+          {node.children.map((child) => (
+            <TreeNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              scripts={scripts}
+              scriptsByCat={scriptsByCat}
+              onAdd={onAdd}
+              onRename={onRename}
+              onDelete={onDelete}
+              onToggleScript={onToggleScript}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
