@@ -171,7 +171,7 @@ async def list_roles(admin=Depends(require_admin)):
 async def create_role(body: RoleCreateRequest, admin=Depends(require_admin)):
     async with get_db() as db:
         try:
-            await auth_service.create_role(db, body.name, body.script_ids)
+            await auth_service.create_role(db, body.name, body.script_ids, body.category_ids)
         except ValueError as e:
             # Known validation errors are safe to surface verbatim.
             raise HTTPException(status_code=400, detail=str(e))
@@ -189,6 +189,7 @@ async def update_role(role_name: str, body: RoleUpdateRequest, admin=Depends(req
         raise HTTPException(status_code=400, detail="Cannot modify system roles")
     async with get_db() as db:
         await auth_service.update_role_scripts(db, role_name, body.script_ids)
+        await auth_service.update_role_categories(db, role_name, body.category_ids)
     return {"ok": True}
 
 
