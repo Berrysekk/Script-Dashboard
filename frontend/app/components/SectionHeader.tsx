@@ -51,8 +51,9 @@ export default function SectionHeader({
     </p>
   );
 
+  const hideMargin = isCollapsible && collapsed;
   return (
-    <div className={`flex items-center justify-between gap-3 min-h-[26px] ${collapsed ? "" : "mb-3"}`}>
+    <div className={`flex items-center justify-between gap-3 min-h-[26px] ${hideMargin ? "" : "mb-3"}`}>
       {isCollapsible ? (
         <button
           onClick={onToggle}

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
@@ -143,30 +143,56 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
   const [loading, setLoading]       = useState(true);
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
   const [previewFile, setPreviewFile] = useState<string | null>(null);
-  const prevStatusRef               = useRef<string | undefined>(scriptStatus);
+  const prevStatusRef               = useRef<string | undefined>(undefined);
+  const genRef                      = useRef(0);
+  const abortRef                    = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
-    fetch(`/api/scripts/${scriptId}/output`)
-      .then(r => r.json())
-      .then(d => { setFiles(d); setLoading(false); });
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const gen = ++genRef.current;
+    fetch(`/api/scripts/${scriptId}/output`, { signal: ctrl.signal })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(d => {
+        if (gen !== genRef.current) return;
+        setFiles(Array.isArray(d) ? d : []);
+      })
+      .catch(() => { /* keep previous files on abort or transient errors */ })
+      .finally(() => { if (gen === genRef.current) setLoading(false); });
   }, [scriptId]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
 
-  // Poll every 1s while the script is running
+  useEffect(() => {
+    load();
+    return () => {
+      abortRef.current?.abort();
+      genRef.current++;
+    };
+  }, [load]);
+
+  // Poll every 1s while the script is running; pause when the tab is hidden.
   useEffect(() => {
     if (scriptStatus !== "running") return;
-    const t = window.setInterval(load, 1000);
-    return () => window.clearInterval(t);
-  }, [scriptStatus, load]);
+    const tick = () => { if (!document.hidden) loadRef.current(); };
+    const onVisibility = () => { if (!document.hidden) loadRef.current(); };
+    const t = window.setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [scriptStatus]);
 
-  // One final refresh on transition away from "running"
+  // One final refresh on transition away from "running".
   useEffect(() => {
     if (prevStatusRef.current === "running" && scriptStatus !== "running") {
-      load();
+      loadRef.current();
     }
     prevStatusRef.current = scriptStatus;
-  }, [scriptStatus, load]);
+  }, [scriptStatus]);
 
   const del = async (filename: string) => {
     const basename = filename.split("/").at(-1)!;
@@ -200,16 +226,37 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
       return next;
     });
 
-  if (loading) return null;
+  // Group files by their immediate parent directory ("" = root). Sort each
+  // group by modified-desc once so poll ticks don't re-sort on every render.
+  const { groups, dirs } = useMemo(() => {
+    const g: Record<string, OutputFile[]> = {};
+    for (const f of files) {
+      const parts = f.filename.split("/");
+      const dir   = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+      (g[dir] ??= []).push(f);
+    }
+    for (const k of Object.keys(g)) {
+      g[k].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+    }
+    return { groups: g, dirs: Object.keys(g).sort() };
+  }, [files]);
 
-  // Group files by their immediate parent directory ("" = root)
-  const groups: Record<string, OutputFile[]> = {};
-  for (const f of files) {
-    const parts = f.filename.split("/");
-    const dir   = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-    (groups[dir] ??= []).push(f);
-  }
-  const dirs = Object.keys(groups).sort();
+  if (loading) return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <SectionHeader
+        title="Output Files"
+        right={
+          <button
+            onClick={load}
+            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          >
+            Refresh
+          </button>
+        }
+      />
+      <p className="text-xs text-gray-400">Loading…</p>
+    </section>
+  );
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
@@ -266,8 +313,8 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
                   </button>
                 </div>
               )}
-              {/* File rows */}
-              {!isCollapsed && [...dirFiles].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime()).map(f => {
+              {/* File rows (already sorted modified-desc by the useMemo above) */}
+              {!isCollapsed && dirFiles.map(f => {
                 const basename = f.filename.split("/").at(-1)!;
                 const url      = `/api/scripts/${scriptId}/output/${encodeOutputPath(f.filename)}`;
                 return (
