@@ -80,11 +80,13 @@ class RoleCreateRequest(BaseModel):
     name: str
     script_ids: list[str] = []
     category_ids: list[str] = []
+    database_ids: list[str] = []
 
 
 class RoleUpdateRequest(BaseModel):
     script_ids: list[str] = []
     category_ids: list[str] = []
+    database_ids: list[str] = []
 
 
 class UserResponse(BaseModel):
@@ -115,5 +117,46 @@ class CategoryUpdateRequest(BaseModel):
 
 class CategoryReorderRequest(BaseModel):
     category_ids: list[str]
+
+
+class DatabaseCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    slug: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=1000)
+
+
+class DatabaseUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    slug: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=1000)
+
+
+class DatabaseColumnCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    key: str = Field(min_length=1, max_length=64)
+    type: str
+    config: Optional[dict] = None
+
+
+class DatabaseColumnUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    type: Optional[str] = None
+    config: Optional[dict] = None
+
+
+class DatabaseColumnReorderRequest(BaseModel):
+    column_ids: list[str]
+
+
+class DatabaseRowCreateRequest(BaseModel):
+    values: dict
+
+
+class DatabaseRowUpdateRequest(BaseModel):
+    values: dict
+
+
+class DatabaseRowReorderRequest(BaseModel):
+    row_ids: list[str]
 
 
