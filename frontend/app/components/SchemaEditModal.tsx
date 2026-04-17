@@ -234,54 +234,68 @@ export default function SchemaEditModal({
                         </tr>
                         {c.type === "select" && (
                           <tr className="border-b border-gray-100 dark:border-neutral-800/60">
-                            <td colSpan={4} className="pb-3 px-2">
-                              <div className="flex items-center gap-2 flex-wrap pl-2">
-                                <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-neutral-500">
-                                  Options
-                                </span>
-                                {(c.config?.options ?? []).map((opt) => (
-                                  <span
-                                    key={opt}
-                                    className="inline-flex items-center gap-1 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 pl-2 pr-1 py-0.5 rounded"
-                                  >
-                                    {opt}
-                                    <button
-                                      type="button"
-                                      onClick={() => removeOption(c, opt)}
-                                      className="text-blue-500/70 hover:text-red-500 px-0.5 leading-none"
-                                      aria-label={`Remove ${opt}`}
-                                    >
-                                      &times;
-                                    </button>
+                            <td colSpan={4} className="pb-3 pt-1 px-2">
+                              <div className="rounded-lg bg-gray-50 dark:bg-neutral-800/40 border border-gray-200 dark:border-neutral-800 p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-neutral-400">
+                                    Select options
                                   </span>
-                                ))}
-                                <input
-                                  className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 w-32"
-                                  placeholder="new option"
-                                  value={optionInput[c.id] ?? ""}
-                                  onChange={(e) =>
-                                    setOptionInput((m) => ({ ...m, [c.id]: e.target.value }))
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      addOption(c);
+                                  <span className="text-[11px] text-gray-400 dark:text-neutral-500">
+                                    {(c.config?.options ?? []).length} option{(c.config?.options ?? []).length === 1 ? "" : "s"}
+                                  </span>
+                                </div>
+                                {(c.config?.options ?? []).length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mb-2">
+                                    {(c.config?.options ?? []).map((opt) => (
+                                      <span
+                                        key={opt}
+                                        className="group inline-flex items-center gap-1.5 text-xs bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 pl-2.5 pr-1 py-1 rounded-full"
+                                      >
+                                        <span className="text-gray-700 dark:text-neutral-200">{opt}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeOption(c, opt)}
+                                          className="w-4 h-4 flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-red-500 transition-colors duration-100"
+                                          aria-label={`Remove ${opt}`}
+                                        >
+                                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                            <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                          </svg>
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                <div className="flex gap-1.5">
+                                  <input
+                                    className="flex-1 text-xs border border-gray-200 dark:border-neutral-700 rounded px-2.5 py-1.5 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                    placeholder="Add option and press Enter"
+                                    value={optionInput[c.id] ?? ""}
+                                    onChange={(e) =>
+                                      setOptionInput((m) => ({ ...m, [c.id]: e.target.value }))
                                     }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => addOption(c)}
-                                  className="text-xs px-2 py-1 rounded border border-gray-200 dark:border-neutral-700 text-gray-600 dark:text-neutral-300 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors duration-100"
-                                >
-                                  Add
-                                </button>
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        addOption(c);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => addOption(c)}
+                                    disabled={!(optionInput[c.id] ?? "").trim()}
+                                    className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors duration-100"
+                                  >
+                                    Add
+                                  </button>
+                                </div>
+                                {optionError[c.id] && (
+                                  <p className="text-xs text-red-600 dark:text-red-400 mt-2">
+                                    {optionError[c.id]}
+                                  </p>
+                                )}
                               </div>
-                              {optionError[c.id] && (
-                                <p className="text-xs text-red-600 dark:text-red-400 pl-2 mt-1">
-                                  {optionError[c.id]}
-                                </p>
-                              )}
                             </td>
                           </tr>
                         )}
