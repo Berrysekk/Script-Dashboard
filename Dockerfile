@@ -43,6 +43,8 @@ COPY --from=frontend-builder /app/frontend/next.config.mjs frontend/next.config.
 # Config files
 COPY nginx.conf       /etc/nginx/nginx.conf
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Prepare writable dirs owned by the unprivileged user. /data is the
 # mounted volume — entries created here are just a placeholder to survive
@@ -59,4 +61,5 @@ EXPOSE 80
 # so the image still works for plain HTTP dev deployments on port 80.
 # supervisord starts as root (nginx master needs it to bind :80) and
 # drops privileges to appuser for FastAPI + Next.js, see supervisord.conf.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
