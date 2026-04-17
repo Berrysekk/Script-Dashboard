@@ -140,7 +140,7 @@ const ScriptCard = forwardRef<HTMLDivElement, Props>(function ScriptCard(
             onClick={() => act(() => onStop(script.id))}
             className={`flex-1 text-xs py-1.5 rounded font-medium disabled:opacity-50 border ${
               script.loop_enabled
-                ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-500"
                 : "bg-red-50 dark:bg-red-900/20 text-red-500 border-red-200 dark:border-red-800 hover:bg-red-100"
             }`}
           >
