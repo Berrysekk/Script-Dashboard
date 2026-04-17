@@ -95,6 +95,55 @@ async def init_db() -> None:
         FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
       )
     """)
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS databases (
+          id          TEXT PRIMARY KEY,
+          name        TEXT NOT NULL,
+          slug        TEXT NOT NULL UNIQUE,
+          description TEXT,
+          created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS database_columns (
+          id          TEXT PRIMARY KEY,
+          database_id TEXT NOT NULL,
+          name        TEXT NOT NULL,
+          key         TEXT NOT NULL,
+          type        TEXT NOT NULL,
+          config      TEXT,
+          position    INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (database_id) REFERENCES databases(id) ON DELETE CASCADE,
+          UNIQUE (database_id, key)
+        )
+        """
+    )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS database_rows (
+          id          TEXT PRIMARY KEY,
+          database_id TEXT NOT NULL,
+          values_json TEXT NOT NULL DEFAULT '{}',
+          position    INTEGER NOT NULL DEFAULT 0,
+          created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (database_id) REFERENCES databases(id) ON DELETE CASCADE
+        )
+        """
+    )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS role_databases (
+          role_name   TEXT NOT NULL,
+          database_id TEXT NOT NULL,
+          PRIMARY KEY (role_name, database_id),
+          FOREIGN KEY (role_name)   REFERENCES roles(name)   ON DELETE CASCADE,
+          FOREIGN KEY (database_id) REFERENCES databases(id) ON DELETE CASCADE
+        )
+        """
+    )
     await db.execute("""
       CREATE TABLE IF NOT EXISTS script_variables (
         script_id TEXT NOT NULL,
