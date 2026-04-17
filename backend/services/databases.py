@@ -125,3 +125,133 @@ def coerce_cell(col_type: str, value, config: dict | None):
         raise ValueError("must be valid JSON")
 
     raise ValueError(f"unknown column type: {col_type}")
+
+
+class SlugConflict(ValueError):
+    def __init__(self, slug: str, suggestion: str):
+        super().__init__(f"Slug already taken: {slug}")
+        self.slug = slug
+        self.suggestion = suggestion
+
+
+async def _suggest_free_slug(db, base: str) -> str:
+    for i in range(2, 1000):
+        candidate = f"{base}_{i}"
+        cur = await db.execute("SELECT 1 FROM databases WHERE slug = ?", (candidate,))
+        if not await cur.fetchone():
+            return candidate
+    raise ValueError("Could not find a free slug suggestion")
+
+
+async def create_database(db, name: str, slug: str | None, description: str | None) -> str:
+    if slug is None or slug == "":
+        slug = derive_slug(name)
+    validate_slug(slug)
+    cur = await db.execute("SELECT 1 FROM databases WHERE slug = ?", (slug,))
+    if await cur.fetchone():
+        raise SlugConflict(slug, await _suggest_free_slug(db, slug))
+    db_id = str(uuid.uuid4())
+    await db.execute(
+        "INSERT INTO databases (id, name, slug, description) VALUES (?, ?, ?, ?)",
+        (db_id, name, slug, description),
+    )
+    await db.commit()
+    return db_id
+
+
+async def list_databases(db) -> list[dict]:
+    cur = await db.execute(
+        "SELECT id, name, slug, description, created_at FROM databases ORDER BY created_at ASC"
+    )
+    rows = await cur.fetchall()
+    result: list[dict] = []
+    for r in rows:
+        cur2 = await db.execute(
+            "SELECT COUNT(*) AS n FROM database_columns WHERE database_id = ?", (r["id"],)
+        )
+        col_n = (await cur2.fetchone())["n"]
+        cur3 = await db.execute(
+            "SELECT COUNT(*) AS n FROM database_rows WHERE database_id = ?", (r["id"],)
+        )
+        row_n = (await cur3.fetchone())["n"]
+        result.append({
+            "id": r["id"], "name": r["name"], "slug": r["slug"],
+            "description": r["description"], "created_at": r["created_at"],
+            "column_count": col_n, "row_count": row_n,
+        })
+    return result
+
+
+async def get_database(db, db_id: str) -> dict | None:
+    cur = await db.execute(
+        "SELECT id, name, slug, description, created_at FROM databases WHERE id = ?",
+        (db_id,),
+    )
+    row = await cur.fetchone()
+    if not row:
+        return None
+    cur = await db.execute(
+        "SELECT id, name, key, type, config, position FROM database_columns "
+        "WHERE database_id = ? ORDER BY position ASC, name ASC",
+        (db_id,),
+    )
+    columns = [
+        {
+            "id": c["id"], "name": c["name"], "key": c["key"], "type": c["type"],
+            "config": json.loads(c["config"]) if c["config"] else None,
+            "position": c["position"],
+        }
+        for c in await cur.fetchall()
+    ]
+    cur = await db.execute(
+        "SELECT id, values_json, position, created_at FROM database_rows "
+        "WHERE database_id = ? ORDER BY position ASC, created_at ASC",
+        (db_id,),
+    )
+    rows_out: list[dict] = []
+    for r in await cur.fetchall():
+        try:
+            values = json.loads(r["values_json"])
+        except (json.JSONDecodeError, TypeError):
+            values = {}
+        rows_out.append({
+            "id": r["id"], "values": values,
+            "position": r["position"], "created_at": r["created_at"],
+        })
+    return {
+        "id": row["id"], "name": row["name"], "slug": row["slug"],
+        "description": row["description"], "created_at": row["created_at"],
+        "columns": columns, "rows": rows_out,
+    }
+
+
+async def update_database(
+    db, db_id: str, name: str | None, slug: str | None, description: str | None
+) -> None:
+    cur = await db.execute("SELECT 1 FROM databases WHERE id = ?", (db_id,))
+    if not await cur.fetchone():
+        raise ValueError("Database not found")
+    if slug is not None:
+        validate_slug(slug)
+        cur = await db.execute(
+            "SELECT 1 FROM databases WHERE slug = ? AND id <> ?", (slug, db_id)
+        )
+        if await cur.fetchone():
+            raise SlugConflict(slug, await _suggest_free_slug(db, slug))
+    if name is not None:
+        await db.execute("UPDATE databases SET name = ? WHERE id = ?", (name, db_id))
+    if slug is not None:
+        await db.execute("UPDATE databases SET slug = ? WHERE id = ?", (slug, db_id))
+    if description is not None:
+        await db.execute(
+            "UPDATE databases SET description = ? WHERE id = ?", (description, db_id)
+        )
+    await db.commit()
+
+
+async def delete_database(db, db_id: str) -> None:
+    cur = await db.execute("SELECT 1 FROM databases WHERE id = ?", (db_id,))
+    if not await cur.fetchone():
+        raise ValueError("Database not found")
+    await db.execute("DELETE FROM databases WHERE id = ?", (db_id,))
+    await db.commit()

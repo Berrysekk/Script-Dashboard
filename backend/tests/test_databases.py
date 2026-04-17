@@ -126,3 +126,78 @@ def test_coerce_cell_date():
     assert dbs.coerce_cell("date", "2026-04-17", None) == "2026-04-17"
     with pytest.raises(ValueError):
         dbs.coerce_cell("date", "not-a-date", None)
+
+
+@pytest.mark.asyncio
+async def test_create_database_auto_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        db_id = await dbs.create_database(db, name="NVR List", slug=None, description=None)
+        cur = await db.execute("SELECT slug FROM databases WHERE id = ?", (db_id,))
+        row = await cur.fetchone()
+    assert row["slug"] == "nvr_list"
+
+
+@pytest.mark.asyncio
+async def test_create_database_slug_conflict_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        await dbs.create_database(db, "First", "taken", None)
+        with pytest.raises(dbs.SlugConflict) as ei:
+            await dbs.create_database(db, "Second", "taken", None)
+        assert ei.value.suggestion == "taken_2"
+
+
+@pytest.mark.asyncio
+async def test_list_databases_includes_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "NVR", "nvr", None)
+        await dbs.create_column(db, did, "IP", "ip", "text", None)
+        await dbs.create_row(db, did, {"ip": "1.1.1.1"})
+        listing = await dbs.list_databases(db)
+    assert listing[0]["row_count"] == 1
+    assert listing[0]["column_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_database_rename_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "Old", "old_slug", None)
+        await dbs.update_database(db, did, name="New", slug="new_slug", description="d")
+        cur = await db.execute("SELECT name, slug, description FROM databases WHERE id = ?", (did,))
+        row = await cur.fetchone()
+    assert (row["name"], row["slug"], row["description"]) == ("New", "new_slug", "d")
+
+
+@pytest.mark.asyncio
+async def test_delete_database_cascades(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        await dbs.create_column(db, did, "A", "a", "text", None)
+        await dbs.create_row(db, did, {"a": "v"})
+        await dbs.delete_database(db, did)
+        cur = await db.execute("SELECT COUNT(*) AS n FROM database_columns WHERE database_id = ?", (did,))
+        assert (await cur.fetchone())["n"] == 0
