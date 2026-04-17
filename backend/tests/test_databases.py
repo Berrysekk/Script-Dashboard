@@ -5,6 +5,7 @@ import pytest
 
 from backend import db as _db
 from backend.services import databases as dbs
+from backend.services import auth as auth_service
 
 
 @pytest.mark.asyncio
@@ -515,3 +516,36 @@ async def test_materialize_wipes_stale_files(tmp_path, monkeypatch):
         (script_dir / "databases" / "stale.json").write_text("[]")
         await dbs.materialize_for_script(db, "s1", script_dir)
     assert not (script_dir / "databases" / "stale.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_role_database_grants_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        await auth_service.create_role(db, "ops", script_ids=[], category_ids=[], database_ids=[did])
+        roles = await auth_service.list_roles(db)
+        ops = next(r for r in roles if r["name"] == "ops")
+    assert did in ops["database_ids"]
+
+
+@pytest.mark.asyncio
+async def test_role_delete_cleans_role_databases(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        await auth_service.create_role(db, "ops", script_ids=[], category_ids=[], database_ids=[did])
+        await auth_service.delete_role(db, "ops")
+        cur = await db.execute(
+            "SELECT COUNT(*) AS n FROM role_databases WHERE role_name = ?", ("ops",)
+        )
+        count = (await cur.fetchone())["n"]
+    assert count == 0

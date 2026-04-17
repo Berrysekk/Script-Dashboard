@@ -150,8 +150,14 @@ async def delete_user(db, user_id: str) -> None:
 
 async def list_roles(db):
     cur = await db.execute("SELECT name FROM roles ORDER BY name")
+    role_rows = await cur.fetchall()
+    # Build a map of role_name -> database_ids in one batch query.
+    db_cur = await db.execute("SELECT role_name, database_id FROM role_databases")
+    db_map: dict[str, list] = {}
+    for r in await db_cur.fetchall():
+        db_map.setdefault(r["role_name"], []).append(r["database_id"])
     roles = []
-    for row in await cur.fetchall():
+    for row in role_rows:
         name = row["name"]
         cur2 = await db.execute(
             "SELECT script_id FROM role_scripts WHERE role_name = ?", (name,)
@@ -161,11 +167,16 @@ async def list_roles(db):
             "SELECT category_id FROM role_categories WHERE role_name = ?", (name,)
         )
         category_ids = [r["category_id"] for r in await cur3.fetchall()]
-        roles.append({"name": name, "script_ids": script_ids, "category_ids": category_ids})
+        roles.append({
+            "name": name,
+            "script_ids": script_ids,
+            "category_ids": category_ids,
+            "database_ids": db_map.get(name, []),
+        })
     return roles
 
 
-async def create_role(db, name: str, script_ids: list = None, category_ids: list = None) -> str:
+async def create_role(db, name: str, script_ids: list = None, category_ids: list = None, database_ids: list = None) -> str:
     await db.execute("INSERT INTO roles (name) VALUES (?)", (name,))
     for sid in (script_ids or []):
         await db.execute(
@@ -176,6 +187,11 @@ async def create_role(db, name: str, script_ids: list = None, category_ids: list
         await db.execute(
             "INSERT OR IGNORE INTO role_categories (role_name, category_id) VALUES (?, ?)",
             (name, cid),
+        )
+    for did in (database_ids or []):
+        await db.execute(
+            "INSERT OR IGNORE INTO role_databases (role_name, database_id) VALUES (?, ?)",
+            (name, did),
         )
     await db.commit()
     return name
@@ -201,6 +217,16 @@ async def update_role_categories(db, role_name: str, category_ids: list) -> None
     await db.commit()
 
 
+async def update_role_databases(db, role_name: str, database_ids: list) -> None:
+    await db.execute("DELETE FROM role_databases WHERE role_name = ?", (role_name,))
+    for did in database_ids:
+        await db.execute(
+            "INSERT INTO role_databases (role_name, database_id) VALUES (?, ?)",
+            (role_name, did),
+        )
+    await db.commit()
+
+
 async def delete_role(db, role_name: str) -> None:
     if role_name in ("admin", "user"):
         raise ValueError("Cannot delete system roles")
@@ -210,6 +236,7 @@ async def delete_role(db, role_name: str) -> None:
         raise ValueError(f"Cannot delete role: {count} user(s) still assigned")
     await db.execute("DELETE FROM role_categories WHERE role_name = ?", (role_name,))
     await db.execute("DELETE FROM role_scripts WHERE role_name = ?", (role_name,))
+    await db.execute("DELETE FROM role_databases WHERE role_name = ?", (role_name,))
     await db.execute("DELETE FROM roles WHERE name = ?", (role_name,))
     await db.commit()
 
