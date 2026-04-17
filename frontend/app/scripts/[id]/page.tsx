@@ -6,6 +6,7 @@ import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
 import LogDrawer from "../../components/LogDrawer";
 import { useAuth } from "../../components/AuthGate";
 import { motion, AnimatePresence } from "motion/react";
+import Checkbox from "../../components/Checkbox";
 
 type Run    = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
 type Script = {
@@ -515,12 +516,11 @@ function DatabasesSection({ scriptId, isAdmin }: { scriptId: string; isAdmin: bo
                 key={d.id}
                 className="flex items-center gap-2 py-1 px-1 rounded hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={assignedIds.has(d.id)}
                   disabled={saving}
                   onChange={() => toggle(d.id)}
-                  className="rounded border-gray-300 dark:border-neutral-600"
+                  size="sm"
                 />
                 <span className="text-xs">{d.name}</span>
                 <code className="ml-auto text-[10px] font-mono text-gray-400">{d.slug}</code>

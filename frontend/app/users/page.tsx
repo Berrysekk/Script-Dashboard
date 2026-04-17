@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "../components/AuthGate";
 import { confirmDialog } from "../components/ConfirmDialog";
+import Checkbox from "../components/Checkbox";
 
 type UserRow = {
   id: string;
@@ -63,11 +64,10 @@ function CategoryCheckboxTree({
               {depth > 0 && (
                 <span className="text-gray-300 dark:text-neutral-600 text-[10px] mr-0.5">&#8226;</span>
               )}
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={checked}
                 onChange={() => onToggle(node.id)}
-                className="rounded border-gray-300 dark:border-neutral-600"
+                size="sm"
               />
               <span className="text-xs">{node.name}</span>
             </label>
@@ -492,12 +492,11 @@ export default function UsersPage() {
                           key={s.id}
                           className={`flex items-center gap-3 px-3 py-2.5 ${covered ? "opacity-50 cursor-default" : "hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"}`}
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={covered || roleScripts.has(s.id)}
                             onChange={() => { if (!covered) toggleScript(s.id); }}
                             disabled={covered}
-                            className="rounded border-gray-300 dark:border-neutral-600"
+                            size="sm"
                           />
                           <span className="text-xs">{s.name}</span>
                           {covered && <span className="text-[10px] text-gray-400 ml-auto">via category</span>}
@@ -531,11 +530,10 @@ export default function UsersPage() {
                         key={d.id}
                         className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={roleDatabases.has(d.id)}
                           onChange={() => toggleDatabase(d.id)}
-                          className="rounded border-gray-300 dark:border-neutral-600"
+                          size="sm"
                         />
                         <span className="text-xs">{d.name}</span>
                         <code className="ml-auto font-mono text-[10px] text-gray-400 dark:text-neutral-500">{d.slug}</code>

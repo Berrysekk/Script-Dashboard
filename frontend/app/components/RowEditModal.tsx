@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "motion/react";
+import Checkbox from "./Checkbox";
 
 type Column = {
   id: string;
@@ -92,12 +93,10 @@ export default function RowEditModal({
     if (c.type === "boolean") {
       return (
         <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-neutral-300">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={Boolean(v)}
             disabled={disabled}
-            onChange={(e) => set(c.key, e.target.checked)}
-            className="rounded border-gray-300 dark:border-neutral-700"
+            onChange={(next) => set(c.key, next)}
           />
           <span>{v ? "true" : "false"}</span>
         </label>

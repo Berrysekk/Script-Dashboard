@@ -6,6 +6,7 @@ import { AnimatePresence } from "motion/react";
 import RowEditModal from "@/app/components/RowEditModal";
 import SchemaEditModal from "@/app/components/SchemaEditModal";
 import { confirmDialog } from "@/app/components/ConfirmDialog";
+import Checkbox from "@/app/components/Checkbox";
 
 type Column = {
   id: string;
@@ -38,15 +39,7 @@ const SELECT_BADGE =
 
 function renderCell(col: Column, value: unknown) {
   if (value === null || value === undefined) return <span className={MUTED}>—</span>;
-  if (col.type === "boolean")
-    return (
-      <input
-        type="checkbox"
-        checked={Boolean(value)}
-        disabled
-        className="rounded border-gray-300 dark:border-neutral-700"
-      />
-    );
+  if (col.type === "boolean") return <Checkbox checked={Boolean(value)} size="sm" />;
   if (col.type === "secret") return <code className={MONO_BADGE}>••••••</code>;
   if (col.type === "long_text") {
     const s = String(value);
