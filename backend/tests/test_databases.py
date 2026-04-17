@@ -83,3 +83,46 @@ def test_validate_key_matches_slug_rules():
     assert dbs.validate_key("port") == "port"
     with pytest.raises(ValueError):
         dbs.validate_key("Port")
+
+
+def test_coerce_cell_text():
+    assert dbs.coerce_cell("text", "hello", None) == "hello"
+    assert dbs.coerce_cell("text", 42, None) == "42"
+    assert dbs.coerce_cell("text", None, None) is None
+
+
+def test_coerce_cell_number():
+    assert dbs.coerce_cell("number", 7, None) == 7
+    assert dbs.coerce_cell("number", "3.14", None) == 3.14
+    assert dbs.coerce_cell("number", "", None) is None
+    with pytest.raises(ValueError):
+        dbs.coerce_cell("number", "not a number", None)
+
+
+def test_coerce_cell_boolean():
+    assert dbs.coerce_cell("boolean", True, None) is True
+    assert dbs.coerce_cell("boolean", "true", None) is True
+    assert dbs.coerce_cell("boolean", "false", None) is False
+    assert dbs.coerce_cell("boolean", 0, None) is False
+    with pytest.raises(ValueError):
+        dbs.coerce_cell("boolean", "maybe", None)
+
+
+def test_coerce_cell_select_enforces_options():
+    cfg = {"options": ["http", "https"]}
+    assert dbs.coerce_cell("select", "http", cfg) == "http"
+    with pytest.raises(ValueError):
+        dbs.coerce_cell("select", "ftp", cfg)
+
+
+def test_coerce_cell_json_parses_strings():
+    assert dbs.coerce_cell("json", '{"a": 1}', None) == {"a": 1}
+    assert dbs.coerce_cell("json", [1, 2, 3], None) == [1, 2, 3]
+    with pytest.raises(ValueError):
+        dbs.coerce_cell("json", "not json", None)
+
+
+def test_coerce_cell_date():
+    assert dbs.coerce_cell("date", "2026-04-17", None) == "2026-04-17"
+    with pytest.raises(ValueError):
+        dbs.coerce_cell("date", "not-a-date", None)
