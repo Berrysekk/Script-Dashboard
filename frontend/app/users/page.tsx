@@ -14,12 +14,19 @@ type Role = {
   name: string;
   script_ids: string[];
   category_ids: string[];
+  database_ids: string[];
 };
 
 type ScriptSummary = {
   id: string;
   name: string;
   category?: { id: string; name: string } | null;
+};
+
+type DatabaseSummary = {
+  id: string;
+  name: string;
+  slug: string;
 };
 
 type CategoryNode = {
@@ -84,6 +91,7 @@ export default function UsersPage() {
   const [roles, setRoles]       = useState<Role[]>([]);
   const [scripts, setScripts]   = useState<ScriptSummary[]>([]);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [databases, setDatabases] = useState<DatabaseSummary[]>([]);
   const [loading, setLoading]   = useState(true);
   const [denied, setDenied]     = useState(false);
   const [error, setError]       = useState("");
@@ -100,15 +108,17 @@ export default function UsersPage() {
   const [roleName, setRoleName]         = useState("");
   const [roleScripts, setRoleScripts]   = useState<Set<string>>(new Set());
   const [roleCategories, setRoleCategories] = useState<Set<string>>(new Set());
+  const [roleDatabases, setRoleDatabases] = useState<Set<string>>(new Set());
   const [savingRole, setSavingRole]     = useState(false);
 
   const loadAll = useCallback(async () => {
     setError("");
-    const [usersRes, rolesRes, scriptsRes, catsRes] = await Promise.all([
+    const [usersRes, rolesRes, scriptsRes, catsRes, dbsRes] = await Promise.all([
       fetch("/api/auth/users"),
       fetch("/api/auth/roles"),
       fetch("/api/scripts"),
       fetch("/api/categories"),
+      fetch("/api/databases"),
     ]);
     if (usersRes.status === 403) {
       setDenied(true);
@@ -124,6 +134,7 @@ export default function UsersPage() {
     if (rolesRes.ok) setRoles(await rolesRes.json());
     if (scriptsRes.ok) setScripts(await scriptsRes.json());
     if (catsRes.ok) setCategories(await catsRes.json());
+    if (dbsRes.ok) setDatabases(await dbsRes.json());
     setLoading(false);
   }, []);
 
@@ -158,6 +169,7 @@ export default function UsersPage() {
     setRoleName("");
     setRoleScripts(new Set());
     setRoleCategories(new Set());
+    setRoleDatabases(new Set());
     setShowRoleForm(true);
   };
 
@@ -166,6 +178,7 @@ export default function UsersPage() {
     setRoleName(role.name);
     setRoleScripts(new Set(role.script_ids));
     setRoleCategories(new Set(role.category_ids));
+    setRoleDatabases(new Set(role.database_ids ?? []));
     setShowRoleForm(true);
   };
 
@@ -176,14 +189,14 @@ export default function UsersPage() {
         const res = await fetch(`/api/auth/roles/${encodeURIComponent(editingRole)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ script_ids: [...roleScripts], category_ids: [...roleCategories] }),
+          body: JSON.stringify({ script_ids: [...roleScripts], category_ids: [...roleCategories], database_ids: [...roleDatabases] }),
         });
         if (!res.ok) throw new Error(await res.text());
       } else {
         const res = await fetch("/api/auth/roles", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: roleName, script_ids: [...roleScripts], category_ids: [...roleCategories] }),
+          body: JSON.stringify({ name: roleName, script_ids: [...roleScripts], category_ids: [...roleCategories], database_ids: [...roleDatabases] }),
         });
         if (!res.ok) throw new Error(await res.text());
       }
@@ -203,6 +216,14 @@ export default function UsersPage() {
 
   const toggleScript = (id: string) => {
     setRoleScripts(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleDatabase = (id: string) => {
+    setRoleDatabases(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -397,11 +418,12 @@ export default function UsersPage() {
                   </div>
                   {!isSystem && (
                     <p className="text-[10px] text-gray-400 mt-0.5">
-                      {r.script_ids.length === 0 && r.category_ids.length === 0
-                        ? "No scripts or categories assigned"
+                      {r.script_ids.length === 0 && r.category_ids.length === 0 && (r.database_ids?.length ?? 0) === 0
+                        ? "No scripts, categories, or databases assigned"
                         : [
                             r.script_ids.length > 0 && `${r.script_ids.length} script${r.script_ids.length > 1 ? "s" : ""}`,
                             r.category_ids.length > 0 && `${r.category_ids.length} categor${r.category_ids.length > 1 ? "ies" : "y"}`,
+                            (r.database_ids?.length ?? 0) > 0 && `${r.database_ids.length} database${r.database_ids.length > 1 ? "s" : ""}`,
                           ].filter(Boolean).join(", ") + " assigned"}
                     </p>
                   )}
@@ -496,6 +518,29 @@ export default function UsersPage() {
                     />
                   </div>
                   <p className="text-[10px] text-gray-400 mt-1">Selecting a category grants access to all scripts in it and its subcategories.</p>
+                </div>
+              )}
+
+              {databases.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-[10px] text-gray-400 mb-2">Databases this role can access</label>
+                  <div className="max-h-[200px] overflow-y-auto border border-gray-200 dark:border-neutral-700 rounded-lg divide-y divide-gray-100 dark:divide-neutral-800">
+                    {databases.map((d) => (
+                      <label
+                        key={d.id}
+                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={roleDatabases.has(d.id)}
+                          onChange={() => toggleDatabase(d.id)}
+                          className="rounded border-gray-300 dark:border-neutral-600"
+                        />
+                        <span className="text-xs">{d.name}</span>
+                        <code className="ml-auto font-mono text-[10px] text-gray-400 dark:text-neutral-500">{d.slug}</code>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               )}
 
