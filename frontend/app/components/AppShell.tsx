@@ -168,6 +168,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Bottom actions */}
         <div className="border-t border-gray-200 dark:border-neutral-800 p-3 flex flex-col gap-1.5">
+          <Link
+            href="/databases"
+            className={`text-xs px-3 py-1.5 rounded text-center font-medium transition-colors duration-200
+              ${pathname?.startsWith("/databases")
+                ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600"
+                : "border border-gray-200 dark:border-neutral-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}
+          >
+            Databases
+          </Link>
           {user?.role === "admin" && (
             <Link
               href="/users"
