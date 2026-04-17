@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
@@ -226,6 +226,21 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
       return next;
     });
 
+  // Group files by their immediate parent directory ("" = root). Sort each
+  // group by modified-desc once so poll ticks don't re-sort on every render.
+  const { groups, dirs } = useMemo(() => {
+    const g: Record<string, OutputFile[]> = {};
+    for (const f of files) {
+      const parts = f.filename.split("/");
+      const dir   = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+      (g[dir] ??= []).push(f);
+    }
+    for (const k of Object.keys(g)) {
+      g[k].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+    }
+    return { groups: g, dirs: Object.keys(g).sort() };
+  }, [files]);
+
   if (loading) return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
       <SectionHeader
@@ -242,15 +257,6 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
       <p className="text-xs text-gray-400">Loading…</p>
     </section>
   );
-
-  // Group files by their immediate parent directory ("" = root)
-  const groups: Record<string, OutputFile[]> = {};
-  for (const f of files) {
-    const parts = f.filename.split("/");
-    const dir   = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-    (groups[dir] ??= []).push(f);
-  }
-  const dirs = Object.keys(groups).sort();
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
@@ -307,8 +313,8 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
                   </button>
                 </div>
               )}
-              {/* File rows */}
-              {!isCollapsed && [...dirFiles].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime()).map(f => {
+              {/* File rows (already sorted modified-desc by the useMemo above) */}
+              {!isCollapsed && dirFiles.map(f => {
                 const basename = f.filename.split("/").at(-1)!;
                 const url      = `/api/scripts/${scriptId}/output/${encodeOutputPath(f.filename)}`;
                 return (
