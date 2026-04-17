@@ -67,12 +67,16 @@ export default function DatabaseDetailPage({
   const isAdmin = user?.role === "admin";
 
   async function load() {
-    const [u, d] = await Promise.all([
-      fetch("/api/auth/me").then((r) => r.json()),
-      fetch(`/api/databases/${id}`).then((r) => r.json()),
+    const [meRes, dbRes] = await Promise.all([
+      fetch("/api/auth/me"),
+      fetch(`/api/databases/${id}`),
     ]);
-    setUser(u);
-    setDb(d);
+    if (meRes.ok) setUser(await meRes.json());
+    if (dbRes.ok) {
+      setDb(await dbRes.json());
+    } else if (dbRes.status === 403 || dbRes.status === 404) {
+      window.location.href = "/databases";
+    }
   }
 
   useEffect(() => {
