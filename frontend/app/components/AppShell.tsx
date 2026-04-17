@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useSpring, useTransform } from "motion/react";
 import { useAuth } from "./AuthGate";
-import ConfirmDialogHost from "./ConfirmDialog";
+import ConfirmDialogHost, { confirmDialog } from "./ConfirmDialog";
 import SidebarNavLink from "./SidebarNavLink";
 
 type ScriptSummary = {
@@ -175,16 +175,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Databases list */}
           <div className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800/60">
-            <Link
-              href="/databases"
-              className={`flex items-center justify-between px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors duration-150
-                ${pathname === "/databases"
-                  ? "text-blue-600"
-                  : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"}`}
-            >
-              <span>Databases</span>
-              <span className="text-[10px] text-gray-300 dark:text-neutral-600 normal-case tracking-normal font-normal">all</span>
-            </Link>
+            <SidebarNavLink href="/databases" label="Databases" />
             <AnimatePresence mode="popLayout">
               {databases.map(d => {
                 const active = pathname === `/databases/${d.id}`;
@@ -218,7 +209,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="border-t border-gray-200 dark:border-neutral-800 flex flex-col">
           {user?.role === "admin" && <SidebarNavLink href="/users" label="Users" />}
           <button
-            onClick={logout}
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: "Sign out?",
+                message: "You'll need to sign in again to continue.",
+                confirmLabel: "Sign out",
+                variant: "default",
+              });
+              if (ok) logout();
+            }}
             className="text-left px-4 py-2.5 text-[12.5px] font-medium text-gray-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors duration-200"
           >
             Sign out

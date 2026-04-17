@@ -284,22 +284,28 @@ export default function DatabaseDetailPage({
             <thead className="bg-gray-50 dark:bg-neutral-950/50 text-left text-xs text-gray-500 dark:text-neutral-400 border-b border-gray-200 dark:border-neutral-800">
               <tr>
                 {db.columns.map((c) => {
+                  const sortable = c.type !== "secret";
                   const sortState: "asc" | "desc" | "off" =
-                    sort?.colKey === c.key ? sort.dir : "off";
+                    sortable && sort?.colKey === c.key ? sort.dir : "off";
                   return (
                     <th key={c.id} className="py-2 px-3 font-medium whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(c.key)}
-                        title={`Click to sort by ${c.name}`}
-                        className="group inline-flex items-center gap-1.5 text-left hover:text-gray-900 dark:hover:text-neutral-100 transition-colors duration-100 cursor-pointer"
-                      >
-                        <span className="text-gray-700 dark:text-neutral-300">{c.name}</span>
-                        <span className="text-[11px] text-gray-400 dark:text-neutral-500 font-normal">
-                          {c.type}
+                      {sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(c.key)}
+                          title={`Click to sort by ${c.name}`}
+                          className="group inline-flex items-center gap-1.5 text-left hover:text-gray-900 dark:hover:text-neutral-100 transition-colors duration-100 cursor-pointer"
+                        >
+                          <span className="text-gray-700 dark:text-neutral-300">{c.name}</span>
+                          <span className="text-[11px] text-gray-400 dark:text-neutral-500 font-normal">{c.type}</span>
+                          <SortIcon state={sortState} />
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="text-gray-700 dark:text-neutral-300">{c.name}</span>
+                          <span className="text-[11px] text-gray-400 dark:text-neutral-500 font-normal">{c.type}</span>
                         </span>
-                        <SortIcon state={sortState} />
-                      </button>
+                      )}
                     </th>
                   );
                 })}
