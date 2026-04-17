@@ -7,6 +7,8 @@ import LogDrawer from "../../components/LogDrawer";
 import { useAuth } from "../../components/AuthGate";
 import { motion, AnimatePresence } from "motion/react";
 import Checkbox from "../../components/Checkbox";
+import SectionHeader from "../../components/SectionHeader";
+import { confirmDialog } from "../../components/ConfirmDialog";
 
 type Run    = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
 type Script = {
@@ -175,13 +177,18 @@ function OutputSection({ scriptId }: { scriptId: string }) {
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Output Files
-          {files.length > 0 && <span className="ml-2 font-normal text-gray-400">({files.length})</span>}
-        </p>
-        <button onClick={load} className="text-[11px] text-gray-400 hover:text-gray-600">↻ Refresh</button>
-      </div>
+      <SectionHeader
+        title="Output Files"
+        count={files.length}
+        right={
+          <button
+            onClick={load}
+            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          >
+            Refresh
+          </button>
+        }
+      />
 
       {files.length === 0 ? (
         <p className="text-xs text-gray-400">
@@ -192,7 +199,6 @@ function OutputSection({ scriptId }: { scriptId: string }) {
         dirs.map(dir => {
           const dirFiles  = groups[dir];
           const isCollapsed = collapsed.has(dir);
-          const label     = dir || "📁 /";
           return (
             <div key={dir || "__root__"} className="mb-3 last:mb-0">
               {/* Directory header — only shown for subdirectories */}
@@ -202,9 +208,18 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                   className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400
                     w-full text-left py-1 hover:text-gray-700 dark:hover:text-gray-200"
                 >
-                  <span>{isCollapsed ? "▶" : "▼"}</span>
-                  <span className="font-mono">📁 {label}</span>
-                  <span className="text-gray-400 font-normal">({dirFiles.length})</span>
+                  <motion.span
+                    animate={{ rotate: isCollapsed ? -90 : 0 }}
+                    transition={{ duration: 0.12 }}
+                    className="inline-flex"
+                    aria-hidden
+                  >
+                    <svg viewBox="0 0 12 12" className="w-2.5 h-2.5">
+                      <path d="M2 4 L6 8 L10 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </motion.span>
+                  <span className="font-mono">{dir}</span>
+                  <span className="text-gray-400 font-normal">· {dirFiles.length}</span>
                 </button>
               )}
               {/* File rows */}
@@ -241,9 +256,9 @@ function OutputSection({ scriptId }: { scriptId: string }) {
                         </a>
                         <button
                           onClick={() => del(f.filename)}
-                          className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded"
+                          className="text-xs text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                         >
-                          ✕
+                          Delete
                         </button>
                       </div>
                     </div>
@@ -352,10 +367,7 @@ function VariablesSection({ scriptId }: { scriptId: string }) {
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 min-w-0 overflow-hidden">
-      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
-        Variables
-        {vars.length > 0 && <span className="ml-2 font-normal">({vars.length})</span>}
-      </p>
+      <SectionHeader title="Variables" count={vars.length} />
 
       {loading ? (
         <p className="text-xs text-gray-400">Loading...</p>
@@ -394,10 +406,10 @@ function VariablesSection({ scriptId }: { scriptId: string }) {
               )}
               <button
                 onClick={() => remove(v.key)}
-                className="text-xs text-gray-400 hover:text-red-500 shrink-0 w-6 h-6 ml-2 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                className="text-[10px] text-gray-400 hover:text-red-500 shrink-0 ml-2 px-1.5 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 uppercase tracking-wider"
                 title="Delete"
               >
-                ✕
+                Del
               </button>
             </div>
           ))}
@@ -423,9 +435,9 @@ function VariablesSection({ scriptId }: { scriptId: string }) {
                 {newRows.length > 1 && (
                   <button
                     onClick={() => removeRow(idx)}
-                    className="text-xs text-gray-400 hover:text-red-500 shrink-0 w-6 h-6 ml-2 flex items-center justify-center rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="text-[10px] text-gray-400 hover:text-red-500 shrink-0 ml-2 px-1.5 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 uppercase tracking-wider"
                   >
-                    ✕
+                    Del
                   </button>
                 )}
               </div>
@@ -499,10 +511,7 @@ function DatabasesSection({ scriptId, isAdmin }: { scriptId: string; isAdmin: bo
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
-      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
-        Databases
-        {count > 0 && <span className="ml-2 font-normal">({count})</span>}
-      </p>
+      <SectionHeader title="Databases" count={count} />
 
       {isAdmin ? (
         all === null || assigned === null ? (
@@ -815,18 +824,12 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between w-full">
-        <button
-          onClick={() => setCollapsed(c => !c)}
-          className="flex items-center gap-1.5 flex-1 text-left"
-        >
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span className="text-[10px]">{collapsed ? "▶" : "▼"}</span>
-            Code Editor
-          </p>
-        </button>
-        {!collapsed && (
-          <div className="flex items-center gap-3 shrink-0">
+      <SectionHeader
+        title="Code Editor"
+        collapsed={collapsed}
+        onToggle={() => setCollapsed(c => !c)}
+        right={!collapsed ? (
+          <>
             <span className="text-[10px] text-gray-400">Ctrl+S / Cmd+S to save</span>
             <button
               onClick={() => setFullscreen(true)}
@@ -835,9 +838,9 @@ function CodeEditor({ scriptId }: { scriptId: string }) {
             >
               Fullsize
             </button>
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
 
       {!collapsed && (
         <>
@@ -997,13 +1000,11 @@ function RequirementsEditor({ scriptId, onReinstallStarted }: {
 
   return (
     <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          Requirements
-          <span className="ml-2 font-normal normal-case text-gray-400">requirements.txt</span>
-        </p>
-        <span className="text-[10px] text-gray-400">one package per line</span>
-      </div>
+      <SectionHeader
+        title="Requirements"
+        hint="requirements.txt"
+        right={<span className="text-[10px] text-gray-400">one package per line</span>}
+      />
 
       <textarea
         ref={textareaRef}
@@ -1034,7 +1035,7 @@ function RequirementsEditor({ scriptId, onReinstallStarted }: {
         >
           {installing ? "Reinstalling…" : "Save & Reinstall"}
         </button>
-        {saved && <span className="text-xs text-green-500">✓ Saved</span>}
+        {saved && <span className="text-xs text-green-500">Saved</span>}
         <span className="text-[10px] text-gray-400 ml-auto">Reinstall rebuilds the venv with updated packages</span>
       </div>
     </section>
@@ -1053,7 +1054,6 @@ export default function ScriptDetail() {
   const [desc, setDesc]           = useState("");
   const [saving, setSaving]       = useState(false);
   const [busy, setBusy]           = useState(false);
-  const [confirm, setConfirm]     = useState(false);
   const [showLoopInput, setShowLoopInput] = useState(false);
   const [error, setError]         = useState("");
   const [logRunId, setLogRunId]   = useState<string | null>(null);
@@ -1235,7 +1235,7 @@ export default function ScriptDetail() {
 
           {/* Metadata */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Details</p>
+            <SectionHeader title="Details" />
             <label className="block text-[10px] text-gray-400 mb-1">Name</label>
             <input
               className="w-full text-sm border border-gray-200 dark:border-neutral-700 rounded px-3 py-1.5 mb-3 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -1267,10 +1267,7 @@ export default function ScriptDetail() {
 
           {/* Log history */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
-              Run History
-              {script.runs.length > 0 && <span className="ml-2 font-normal">({script.runs.length})</span>}
-            </p>
+            <SectionHeader title="Run History" count={script.runs.length} />
             {script.runs.length === 0 ? (
               <p className="text-xs text-gray-400">No runs yet.</p>
             ) : (
@@ -1323,30 +1320,26 @@ export default function ScriptDetail() {
 
           {/* Danger zone */}
           <section className="border border-red-200 dark:border-red-900/40 rounded-lg p-4">
-            <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-3">Danger Zone</p>
-            {!confirm ? (
-              <button
-                onClick={() => setConfirm(true)}
-                className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-100 px-3 py-1.5 rounded"
-              >
-                Delete script &amp; all logs
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-xs text-red-400">Cannot be undone.</p>
-                <button
-                  onClick={async () => {
-                    await fetch(`/api/scripts/${id}`, { method: "DELETE" });
-                    window.dispatchEvent(new Event("scripts-changed"));
-                    router.push("/");
-                  }}
-                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded"
-                >
-                  Delete
-                </button>
-                <button onClick={() => setConfirm(false)} className="text-xs text-gray-400 px-2">Cancel</button>
-              </div>
-            )}
+            <div className="mb-3">
+              <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wider">Danger Zone</p>
+            </div>
+            <button
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: `Delete script "${script.name}"?`,
+                  message: "The script, its code, variables, and all run logs will be removed. This cannot be undone.",
+                  confirmLabel: "Delete",
+                  variant: "danger",
+                });
+                if (!ok) return;
+                await fetch(`/api/scripts/${id}`, { method: "DELETE" });
+                window.dispatchEvent(new Event("scripts-changed"));
+                router.push("/");
+              }}
+              className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/30 px-3 py-1.5 rounded transition-colors"
+            >
+              Delete script &amp; all logs
+            </button>
           </section>
 
         </div>
