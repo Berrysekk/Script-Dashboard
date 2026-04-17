@@ -153,7 +153,27 @@ function OutputSection({ scriptId }: { scriptId: string }) {
   useEffect(() => { load(); }, [load]);
 
   const del = async (filename: string) => {
+    const basename = filename.split("/").at(-1)!;
+    const ok = await confirmDialog({
+      title: `Delete "${basename}"?`,
+      message: "This output file will be removed from disk.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     await fetch(`/api/scripts/${scriptId}/output/${encodeOutputPath(filename)}`, { method: "DELETE" });
+    load();
+  };
+
+  const delDir = async (dir: string, fileCount: number) => {
+    const ok = await confirmDialog({
+      title: `Delete folder "${dir}"?`,
+      message: `${fileCount} file${fileCount === 1 ? "" : "s"} inside this folder will be removed. This cannot be undone.`,
+      confirmLabel: "Delete folder",
+      variant: "danger",
+    });
+    if (!ok) return;
+    await fetch(`/api/scripts/${scriptId}/output/${encodeOutputPath(dir)}`, { method: "DELETE" });
     load();
   };
 
@@ -203,24 +223,32 @@ function OutputSection({ scriptId }: { scriptId: string }) {
             <div key={dir || "__root__"} className="mb-3 last:mb-0">
               {/* Directory header — only shown for subdirectories */}
               {dir && (
-                <button
-                  onClick={() => toggleDir(dir)}
-                  className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400
-                    w-full text-left py-1 hover:text-gray-700 dark:hover:text-gray-200"
-                >
-                  <motion.span
-                    animate={{ rotate: isCollapsed ? -90 : 0 }}
-                    transition={{ duration: 0.12 }}
-                    className="inline-flex"
-                    aria-hidden
+                <div className="flex items-center gap-2 py-1">
+                  <button
+                    onClick={() => toggleDir(dir)}
+                    className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 flex-1 text-left hover:text-gray-700 dark:hover:text-gray-200"
                   >
-                    <svg viewBox="0 0 12 12" className="w-2.5 h-2.5">
-                      <path d="M2 4 L6 8 L10 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </motion.span>
-                  <span className="font-mono">{dir}</span>
-                  <span className="text-gray-400 font-normal">· {dirFiles.length}</span>
-                </button>
+                    <motion.span
+                      animate={{ rotate: isCollapsed ? -90 : 0 }}
+                      transition={{ duration: 0.12 }}
+                      className="inline-flex"
+                      aria-hidden
+                    >
+                      <svg viewBox="0 0 12 12" className="w-2.5 h-2.5">
+                        <path d="M2 4 L6 8 L10 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </motion.span>
+                    <span className="font-mono">{dir}</span>
+                    <span className="text-gray-400 font-normal">· {dirFiles.length}</span>
+                  </button>
+                  <button
+                    onClick={() => delDir(dir, dirFiles.length)}
+                    className="text-[10px] text-red-400 border border-red-200 dark:border-red-800 px-2 py-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
+                    title="Delete folder"
+                  >
+                    Delete folder
+                  </button>
+                </div>
               )}
               {/* File rows */}
               {!isCollapsed && [...dirFiles].sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime()).map(f => {

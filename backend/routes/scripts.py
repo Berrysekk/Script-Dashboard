@@ -450,19 +450,25 @@ async def download_output(script_id: str, filename: str, inline: bool = False, u
 
 @router.delete("/scripts/{script_id}/output/{filename:path}")
 async def delete_output(script_id: str, filename: str, user=Depends(current_user)):
+    import shutil
     async with get_db() as db:
         await _assert_can_access(db, script_id, user)
     output_dir = (_db.SCRIPTS_DIR / script_id / "output").resolve()
-    output_file = _resolve_output_path(script_id, filename)
-    if not output_file.exists():
-        raise HTTPException(404, "Output file not found")
-    output_file.unlink()
-    # Remove empty parent dirs up to output_dir
-    for parent in output_file.parents:
+    target = _resolve_output_path(script_id, filename)
+    if not target.exists():
+        raise HTTPException(404, "Output path not found")
+    if target == output_dir:
+        raise HTTPException(400, "Cannot delete the output root")
+    if target.is_dir() and not target.is_symlink():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    # Remove now-empty parent dirs up to output_dir
+    for parent in target.parents:
         if parent == output_dir:
             break
         try:
-            parent.rmdir()  # only succeeds if empty
+            parent.rmdir()
         except OSError:
             break
     return {"ok": True}
