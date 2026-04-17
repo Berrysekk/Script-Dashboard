@@ -91,8 +91,15 @@ export default function DatabaseDetailPage({
       body: JSON.stringify({ values }),
     });
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(body);
+      const bodyText = await res.text();
+      let payload: unknown = bodyText;
+      try {
+        const parsed = JSON.parse(bodyText);
+        payload = parsed?.detail ?? parsed;
+      } catch {
+        // non-JSON body — keep raw text
+      }
+      throw new Error(typeof payload === "string" ? payload : JSON.stringify(payload));
     }
     setEditingRow(null);
     load();
