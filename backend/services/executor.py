@@ -27,6 +27,16 @@ _SCRIPT_MAX_FILESIZE    = int(_os.environ.get("SCRIPT_MAX_FILESIZE", 500 * 1024 
 # loops are unaffected.
 _MIN_LOOP_INTERVAL_SECONDS = int(_os.environ.get("SCRIPT_MIN_LOOP_SECONDS", 30))
 
+# Env vars a user-defined script variable must never shadow. Exposed at module
+# scope so tests can introspect membership without reading source text.
+_SAFE_SKIP = frozenset({
+    "PATH", "HOME", "USER", "SHELL",
+    "LD_PRELOAD", "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+    "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+    "SCRIPT_OUTPUT_DIR", "SCRIPT_DB_DIR",
+})
+
 # run_id -> list[asyncio.Queue]  — one Queue per connected WebSocket client
 _ws_queues: dict[str, list[asyncio.Queue]] = {}
 
@@ -218,6 +228,11 @@ async def _execute(
 
             output_dir = script_dir / "output"
             output_dir.mkdir(exist_ok=True)
+            # Materialize user-managed databases into <script_dir>/databases/ so
+            # scripts can read them via SCRIPT_DB_DIR.
+            from backend.services import databases as databases_service
+            async with _db.get_db() as db_conn:
+                await databases_service.materialize_for_script(db_conn, script_id, script_dir)
             run_env = {**_os.environ, "SCRIPT_OUTPUT_DIR": str(output_dir)}
             # Inject user-defined variables (set BEFORE SCRIPT_OUTPUT_DIR
             # so a malicious key can never shadow it — we re-set it after).
@@ -226,16 +241,13 @@ async def _execute(
                     "SELECT key, value FROM script_variables WHERE script_id = ?",
                     (script_id,),
                 )
-                _SAFE_SKIP = {"PATH", "HOME", "USER", "SHELL", "LD_PRELOAD",
-                              "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
-                              "DYLD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME",
-                              "VIRTUAL_ENV", "SCRIPT_OUTPUT_DIR"}
                 for row in await cur.fetchall():
                     k = row["key"]
                     if k.upper() not in _SAFE_SKIP and "\x00" not in row["value"]:
                         run_env[k] = row["value"]
             # Re-assert critical vars so user variables can never shadow them
             run_env["SCRIPT_OUTPUT_DIR"] = str(output_dir)
+            run_env["SCRIPT_DB_DIR"] = str(script_dir / "databases")
             # Remove backend venv vars so the script uses its own venv
             run_env.pop("VIRTUAL_ENV", None)
             venv_python = script_dir / "venv" / "bin" / "python"
