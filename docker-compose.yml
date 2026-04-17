@@ -1,12 +1,12 @@
 version: "3.9"
 
-# ── Standard (bridge) — works out of the box on Unraid ──────────────────────
+# ── Standard (bridge) — works out of the box ──────────────────────
 services:
   dashboard:
     image: ghcr.io/berrysekk/script-dashboard:latest
     container_name: script-dashboard
     ports:
-      - "7080:80"          # access at http://<unraid-ip>:7080
+      - "7080:80"          # access at http://<ip>:7080
     volumes:
       - /mnt/user/appdata/script-dashboard:/data
     # Auth bootstrap — consumed only on first start. If you omit these, the
