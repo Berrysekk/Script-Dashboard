@@ -9,6 +9,8 @@ type Props = {
   activeMatch?: "exact" | "prefix";
   /** Draws a bottom border — used by the Dashboard link at the top of the rail. */
   withBottomBorder?: boolean;
+  /** Draws a top border. */
+  withTopBorder?: boolean;
 };
 
 export default function SidebarNavLink({
@@ -16,6 +18,7 @@ export default function SidebarNavLink({
   label,
   activeMatch = "exact",
   withBottomBorder = false,
+  withTopBorder = false,
 }: Props) {
   const pathname = usePathname();
   const active =
@@ -27,6 +30,7 @@ export default function SidebarNavLink({
     <Link
       href={href}
       className={`flex items-center gap-2 px-4 py-2.5 text-[12.5px] font-medium transition-colors duration-200
+        ${withTopBorder ? "border-t border-gray-200 dark:border-neutral-800" : ""}
         ${withBottomBorder ? "border-b border-gray-200 dark:border-neutral-800" : ""}
         ${
           active
