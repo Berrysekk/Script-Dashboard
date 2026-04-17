@@ -52,7 +52,7 @@ export default function SectionHeader({
   );
 
   return (
-    <div className="flex items-center justify-between gap-3 mb-3 min-h-[26px]">
+    <div className={`flex items-center justify-between gap-3 min-h-[26px] ${collapsed ? "" : "mb-3"}`}>
       {isCollapsible ? (
         <button
           onClick={onToggle}

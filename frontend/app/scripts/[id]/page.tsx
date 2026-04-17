@@ -138,11 +138,12 @@ function FilePreview({ scriptId, filename, onClose }: {
   );
 }
 
-function OutputSection({ scriptId }: { scriptId: string }) {
+function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptStatus?: string }) {
   const [files, setFiles]           = useState<OutputFile[]>([]);
   const [loading, setLoading]       = useState(true);
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
   const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const prevStatusRef               = useRef<string | undefined>(scriptStatus);
 
   const load = useCallback(() => {
     fetch(`/api/scripts/${scriptId}/output`)
@@ -151,6 +152,21 @@ function OutputSection({ scriptId }: { scriptId: string }) {
   }, [scriptId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Poll every 1s while the script is running
+  useEffect(() => {
+    if (scriptStatus !== "running") return;
+    const t = window.setInterval(load, 1000);
+    return () => window.clearInterval(t);
+  }, [scriptStatus, load]);
+
+  // One final refresh on transition away from "running"
+  useEffect(() => {
+    if (prevStatusRef.current === "running" && scriptStatus !== "running") {
+      load();
+    }
+    prevStatusRef.current = scriptStatus;
+  }, [scriptStatus, load]);
 
   const del = async (filename: string) => {
     const basename = filename.split("/").at(-1)!;
@@ -1259,7 +1275,7 @@ export default function ScriptDetail() {
         <div className="min-w-0 space-y-4">
           <CodeEditor scriptId={id} />
           <RequirementsEditor scriptId={id} onReinstallStarted={fetchScript} />
-          <OutputSection scriptId={id} />
+          <OutputSection scriptId={id} scriptStatus={script.status} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <VariablesSection scriptId={id} />
             <DatabasesSection scriptId={id} isAdmin={isAdmin} />
