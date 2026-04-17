@@ -255,3 +255,169 @@ async def delete_database(db, db_id: str) -> None:
         raise ValueError("Database not found")
     await db.execute("DELETE FROM databases WHERE id = ?", (db_id,))
     await db.commit()
+
+
+async def create_column(
+    db, db_id: str, name: str, key: str, col_type: str, config: dict | None
+) -> str:
+    cur = await db.execute("SELECT 1 FROM databases WHERE id = ?", (db_id,))
+    if not await cur.fetchone():
+        raise ValueError("Database not found")
+    validate_key(key)
+    if col_type not in VALID_COLUMN_TYPES:
+        raise ValueError(f"Unknown column type: {col_type}")
+    if col_type == "select":
+        opts = (config or {}).get("options")
+        if not isinstance(opts, list) or not opts or not all(isinstance(o, str) for o in opts):
+            raise ValueError("select columns require config.options (non-empty list of strings)")
+    cur = await db.execute(
+        "SELECT COUNT(*) AS n FROM database_columns WHERE database_id = ?", (db_id,)
+    )
+    if (await cur.fetchone())["n"] >= MAX_COLS_PER_DB:
+        raise ValueError(f"Maximum of {MAX_COLS_PER_DB} columns per database")
+    cur = await db.execute(
+        "SELECT 1 FROM database_columns WHERE database_id = ? AND key = ?", (db_id, key)
+    )
+    if await cur.fetchone():
+        raise ValueError(f"Column key already exists: {key}")
+    cur = await db.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM database_columns WHERE database_id = ?",
+        (db_id,),
+    )
+    position = (await cur.fetchone())["p"]
+    col_id = str(uuid.uuid4())
+    await db.execute(
+        "INSERT INTO database_columns (id, database_id, name, key, type, config, position) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (col_id, db_id, name, key, col_type, json.dumps(config) if config else None, position),
+    )
+    await db.commit()
+    return col_id
+
+
+async def update_column(
+    db, db_id: str, col_id: str,
+    name: str | None, col_type: str | None, config: dict | None,
+) -> dict:
+    cur = await db.execute(
+        "SELECT id, key, type, config FROM database_columns WHERE id = ? AND database_id = ?",
+        (col_id, db_id),
+    )
+    row = await cur.fetchone()
+    if not row:
+        raise ValueError("Column not found")
+    current_type = row["type"]
+    current_key = row["key"]
+    new_type = col_type if col_type is not None else current_type
+    new_config = config if config is not None else (
+        json.loads(row["config"]) if row["config"] else None
+    )
+    if new_type not in VALID_COLUMN_TYPES:
+        raise ValueError(f"Unknown column type: {new_type}")
+
+    if new_type == "select":
+        new_opts = set((new_config or {}).get("options") or [])
+        cur = await db.execute(
+            "SELECT id, values_json FROM database_rows WHERE database_id = ?", (db_id,)
+        )
+        affected: list[str] = []
+        for r in await cur.fetchall():
+            try:
+                vs = json.loads(r["values_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            v = vs.get(current_key)
+            if v is not None and str(v) not in new_opts:
+                affected.append(r["id"])
+        if affected:
+            raise OptionsInUse(affected)
+
+    coerced = 0
+    nulled = 0
+    if col_type is not None and col_type != current_type:
+        cur = await db.execute(
+            "SELECT id, values_json FROM database_rows WHERE database_id = ?", (db_id,)
+        )
+        rs = await cur.fetchall()
+        for r in rs:
+            try:
+                vs = json.loads(r["values_json"])
+            except (json.JSONDecodeError, TypeError):
+                vs = {}
+            if current_key not in vs:
+                continue
+            try:
+                new_val = coerce_cell(new_type, vs[current_key], new_config)
+                vs[current_key] = new_val
+                coerced += 1
+            except ValueError:
+                vs[current_key] = None
+                nulled += 1
+            await db.execute(
+                "UPDATE database_rows SET values_json = ? WHERE id = ?",
+                (json.dumps(vs), r["id"]),
+            )
+
+    if name is not None:
+        await db.execute(
+            "UPDATE database_columns SET name = ? WHERE id = ?", (name, col_id)
+        )
+    if col_type is not None:
+        await db.execute(
+            "UPDATE database_columns SET type = ? WHERE id = ?", (col_type, col_id)
+        )
+    if config is not None:
+        await db.execute(
+            "UPDATE database_columns SET config = ? WHERE id = ?",
+            (json.dumps(config) if config else None, col_id),
+        )
+    await db.commit()
+    return {"coerced": coerced, "nulled": nulled}
+
+
+class OptionsInUse(ValueError):
+    def __init__(self, affected_row_ids: list[str]):
+        super().__init__("Select options in use by existing rows")
+        self.affected_row_ids = affected_row_ids
+
+
+async def delete_column(db, db_id: str, col_id: str) -> None:
+    cur = await db.execute(
+        "SELECT key FROM database_columns WHERE id = ? AND database_id = ?",
+        (col_id, db_id),
+    )
+    row = await cur.fetchone()
+    if not row:
+        raise ValueError("Column not found")
+    key_to_drop = row["key"]
+    cur = await db.execute(
+        "SELECT id, values_json FROM database_rows WHERE database_id = ?", (db_id,)
+    )
+    for r in await cur.fetchall():
+        try:
+            vs = json.loads(r["values_json"])
+        except (json.JSONDecodeError, TypeError):
+            vs = {}
+        if key_to_drop in vs:
+            vs.pop(key_to_drop, None)
+            await db.execute(
+                "UPDATE database_rows SET values_json = ? WHERE id = ?",
+                (json.dumps(vs), r["id"]),
+            )
+    await db.execute("DELETE FROM database_columns WHERE id = ?", (col_id,))
+    await db.commit()
+
+
+async def reorder_columns(db, db_id: str, column_ids: list[str]) -> None:
+    cur = await db.execute(
+        "SELECT id FROM database_columns WHERE database_id = ?", (db_id,)
+    )
+    existing = {r["id"] for r in await cur.fetchall()}
+    if set(column_ids) != existing:
+        raise ValueError("column_ids must exactly match existing columns")
+    for idx, cid in enumerate(column_ids):
+        await db.execute(
+            "UPDATE database_columns SET position = ? WHERE id = ? AND database_id = ?",
+            (idx, cid, db_id),
+        )
+    await db.commit()

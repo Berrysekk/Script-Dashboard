@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from backend import db as _db
@@ -201,3 +203,101 @@ async def test_delete_database_cascades(tmp_path, monkeypatch):
         await dbs.delete_database(db, did)
         cur = await db.execute("SELECT COUNT(*) AS n FROM database_columns WHERE database_id = ?", (did,))
         assert (await cur.fetchone())["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_column_appends_position(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        cid1 = await dbs.create_column(db, did, "IP", "ip", "text", None)
+        cid2 = await dbs.create_column(db, did, "Port", "port", "number", None)
+        cur = await db.execute(
+            "SELECT id, position FROM database_columns WHERE database_id = ? ORDER BY position",
+            (did,),
+        )
+        rows = [(r["id"], r["position"]) for r in await cur.fetchall()]
+    assert rows == [(cid1, 0), (cid2, 1)]
+
+
+@pytest.mark.asyncio
+async def test_create_column_rejects_duplicate_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        await dbs.create_column(db, did, "IP", "ip", "text", None)
+        with pytest.raises(ValueError):
+            await dbs.create_column(db, did, "IP2", "ip", "text", None)
+
+
+@pytest.mark.asyncio
+async def test_create_column_rejects_bad_type(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        with pytest.raises(ValueError):
+            await dbs.create_column(db, did, "bad", "bad", "blob", None)
+
+
+@pytest.mark.asyncio
+async def test_max_columns_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        for i in range(dbs.MAX_COLS_PER_DB):
+            await dbs.create_column(db, did, f"C{i}", f"c{i}", "text", None)
+        with pytest.raises(ValueError):
+            await dbs.create_column(db, did, "over", "over", "text", None)
+
+
+@pytest.mark.asyncio
+async def test_delete_column_drops_from_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        cid = await dbs.create_column(db, did, "IP", "ip", "text", None)
+        await dbs.create_row(db, did, {"ip": "1.1.1.1"})
+        await dbs.delete_column(db, did, cid)
+        cur = await db.execute("SELECT values_json FROM database_rows WHERE database_id = ?", (did,))
+        vj = (await cur.fetchone())["values_json"]
+    assert json.loads(vj) == {}
+
+
+@pytest.mark.asyncio
+async def test_reorder_columns(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        did = await dbs.create_database(db, "X", "x", None)
+        a = await dbs.create_column(db, did, "A", "a", "text", None)
+        b = await dbs.create_column(db, did, "B", "b", "text", None)
+        await dbs.reorder_columns(db, did, [b, a])
+        cur = await db.execute(
+            "SELECT id FROM database_columns WHERE database_id = ? ORDER BY position",
+            (did,),
+        )
+        order = [r["id"] for r in await cur.fetchall()]
+    assert order == [b, a]
