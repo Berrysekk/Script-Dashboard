@@ -52,7 +52,7 @@ export default function DatabasesPage() {
   };
 
   const handleDelete = async (db: Database) => {
-    if (!confirm(`Delete database "${db.name}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete database "${db.name}"? This removes all rows and role grants.`)) return;
     const res = await fetch(`/api/databases/${db.id}`, { method: "DELETE" });
     if (res.ok) loadAll();
   };
