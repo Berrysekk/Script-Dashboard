@@ -7,6 +7,7 @@ import RowEditModal from "@/app/components/RowEditModal";
 import SchemaEditModal from "@/app/components/SchemaEditModal";
 import { confirmDialog } from "@/app/components/ConfirmDialog";
 import Checkbox from "@/app/components/Checkbox";
+import Select from "@/app/components/Select";
 
 type Column = {
   id: string;
@@ -418,34 +419,34 @@ function FilterInput({
   }
   if (column.type === "boolean") {
     return (
-      <select
+      <Select
+        className="w-full"
+        buttonClassName="w-full"
+        size="sm"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={baseInput}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <option value="">any</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-      </select>
+        onChange={onChange}
+        options={[
+          { value: "", label: "any" },
+          { value: "true", label: "true" },
+          { value: "false", label: "false" },
+        ]}
+      />
     );
   }
   if (column.type === "select") {
     const opts = column.config?.options ?? [];
     return (
-      <select
+      <Select
+        className="w-full"
+        buttonClassName="w-full"
+        size="sm"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={baseInput}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <option value="">any</option>
-        {opts.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        options={[
+          { value: "", label: "any" },
+          ...opts.map((o) => ({ value: o, label: o })),
+        ]}
+      />
     );
   }
   return (

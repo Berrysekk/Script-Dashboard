@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import Checkbox from "./Checkbox";
+import Select from "./Select";
 
 type Column = {
   id: string;
@@ -139,19 +140,18 @@ export default function RowEditModal({
     if (c.type === "select") {
       const options = c.config?.options ?? [];
       return (
-        <select
-          className={inputCls}
+        <Select
+          className="w-full"
+          buttonClassName="w-full"
           value={typeof v === "string" ? v : ""}
           disabled={disabled}
-          onChange={(e) => set(c.key, e.target.value)}
-        >
-          <option value="">— select —</option>
-          {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+          placeholder="— select —"
+          onChange={(next) => set(c.key, next)}
+          options={[
+            { value: "", label: "— select —" },
+            ...options.map((o) => ({ value: o, label: o })),
+          ]}
+        />
       );
     }
 

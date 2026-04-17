@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Select from "./Select";
 
 const INTERVAL_PRESETS = ["5m", "15m", "30m", "1h", "6h", "1d"];
 const DAYS = [
@@ -168,14 +169,16 @@ export default function LoopPicker({ disabled, onSelect, onCancel }: Props) {
       {tab === "monthly" && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] text-gray-400">Day</span>
-          <select
-            value={monthDay} onChange={e => setMonthDay(e.target.value)} disabled={disabled}
-            className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
-          >
-            {Array.from({ length: 28 }, (_, i) => i + 1).map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+          <Select
+            size="sm"
+            value={String(monthDay)}
+            onChange={setMonthDay}
+            disabled={disabled}
+            options={Array.from({ length: 28 }, (_, i) => i + 1).map((d) => ({
+              value: String(d),
+              label: String(d),
+            }))}
+          />
           <span className="text-[10px] text-gray-400">at</span>
           <input
             type="time" value={time} onChange={e => setTime(e.target.value)} disabled={disabled}

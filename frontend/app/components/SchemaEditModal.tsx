@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import { motion } from "motion/react";
 import { confirmDialog } from "./ConfirmDialog";
+import Select from "./Select";
 
 type Column = {
   id: string;
@@ -214,15 +215,12 @@ export default function SchemaEditModal({
                             </code>
                           </td>
                           <td className="py-2 pr-2">
-                            <select
-                              className={inputCls}
+                            <Select
+                              size="sm"
                               value={c.type}
-                              onChange={(e) => changeType(c, e.target.value)}
-                            >
-                              {COL_TYPES.map((t) => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              onChange={(t) => changeType(c, t)}
+                              options={COL_TYPES.map((t) => ({ value: t, label: t }))}
+                            />
                           </td>
                           <td className="py-2 text-right">
                             <button
@@ -314,15 +312,13 @@ export default function SchemaEditModal({
                   value={newCol.key}
                   onChange={(e) => setNewCol({ ...newCol, key: e.target.value })}
                 />
-                <select
-                  className={`${inputCls} w-40`}
+                <Select
+                  className="w-40"
+                  buttonClassName="w-full"
                   value={newCol.type}
-                  onChange={(e) => setNewCol({ ...newCol, type: e.target.value })}
-                >
-                  {COL_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                  onChange={(t) => setNewCol({ ...newCol, type: t })}
+                  options={COL_TYPES.map((t) => ({ value: t, label: t }))}
+                />
                 <button
                   type="submit"
                   className="text-sm px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-100 whitespace-nowrap"

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "../components/AuthGate";
 import { confirmDialog } from "../components/ConfirmDialog";
 import Checkbox from "../components/Checkbox";
+import Select from "../components/Select";
 
 type UserRow = {
   id: string;
@@ -320,15 +321,13 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="block text-[10px] text-gray-400 mb-1">Role</label>
-                <select
-                  className="w-full text-sm border border-gray-300 dark:border-neutral-700 rounded px-2 py-1.5 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                <Select
+                  className="w-full"
+                  buttonClassName="w-full"
                   value={newRole}
-                  onChange={(e) => setNewRole(e.target.value)}
-                >
-                  {roles.map(r => (
-                    <option key={r.name} value={r.name}>{r.name}</option>
-                  ))}
-                </select>
+                  onChange={setNewRole}
+                  options={roles.map((r) => ({ value: r.name, label: r.name }))}
+                />
               </div>
             </div>
             <button
