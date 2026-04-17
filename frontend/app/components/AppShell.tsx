@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useSpring, useTransform } from "motion/react";
 import { useAuth } from "./AuthGate";
+import ConfirmDialogHost from "./ConfirmDialog";
 
 type ScriptSummary = {
   id: string;
@@ -75,7 +76,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => { prevPathRef.current = pathname; });
 
   // Login page: no shell
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname === "/login") return <>{children}<ConfirmDialogHost /></>;
 
   const total = scripts.length;
   const running = scripts.filter(s => s.status === "running").length;
@@ -196,6 +197,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </motion.aside>
+
+      <ConfirmDialogHost />
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import DatabaseCard, { Database } from "../components/DatabaseCard";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 type User = { id: string; username: string; role: string };
 
@@ -55,7 +56,11 @@ export default function DatabasesPage() {
   };
 
   const handleDelete = async (db: Database) => {
-    if (!confirm(`Delete database "${db.name}"? This removes all rows and role grants.`)) return;
+    const ok = await confirmDialog({
+      title: `Delete database "${db.name}"?`,
+      message: "All rows and role grants for this database are removed.",
+    });
+    if (!ok) return;
     setError(null);
     const res = await fetch(`/api/databases/${db.id}`, { method: "DELETE" });
     if (res.ok) {

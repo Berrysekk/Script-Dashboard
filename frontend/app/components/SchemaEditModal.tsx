@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { motion } from "motion/react";
+import { confirmDialog } from "./ConfirmDialog";
 
 type Column = {
   id: string;
@@ -74,9 +75,13 @@ export default function SchemaEditModal({
   }
 
   async function changeType(c: Column, type: string) {
-    if (!confirm(`Change "${c.name}" from ${c.type} to ${type}? Uncoercible cells become null.`)) {
-      return;
-    }
+    const ok = await confirmDialog({
+      title: `Change "${c.name}" to ${type}?`,
+      message: `Current type: ${c.type}. Cells that can't be coerced become null.`,
+      confirmLabel: "Change type",
+      variant: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/databases/${databaseId}/columns/${c.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -136,9 +141,11 @@ export default function SchemaEditModal({
   }
 
   async function deleteColumn(c: Column) {
-    if (!confirm(`Delete column "${c.name}"? Values for this column are removed from every row.`)) {
-      return;
-    }
+    const ok = await confirmDialog({
+      title: `Delete column "${c.name}"?`,
+      message: "Values for this column are removed from every row.",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/databases/${databaseId}/columns/${c.id}`, {
       method: "DELETE",
     });

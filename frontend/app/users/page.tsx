@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "../components/AuthGate";
+import { confirmDialog } from "../components/ConfirmDialog";
 
 type UserRow = {
   id: string;
@@ -158,7 +159,7 @@ export default function UsersPage() {
   };
 
   const removeUser = async (row: UserRow) => {
-    if (!confirm(`Delete ${row.username}?`)) return;
+    if (!(await confirmDialog({ title: `Delete ${row.username}?`, message: "The user account is removed immediately." }))) return;
     const res = await fetch(`/api/auth/users/${row.id}`, { method: "DELETE" });
     if (!res.ok) { setError(await res.text()); return; }
     loadAll();
@@ -208,7 +209,7 @@ export default function UsersPage() {
   };
 
   const deleteRole = async (name: string) => {
-    if (!confirm(`Delete role "${name}"?`)) return;
+    if (!(await confirmDialog({ title: `Delete role "${name}"?`, message: "Users currently holding this role lose its grants." }))) return;
     const res = await fetch(`/api/auth/roles/${encodeURIComponent(name)}`, { method: "DELETE" });
     if (!res.ok) { setError(await res.text()); return; }
     loadAll();

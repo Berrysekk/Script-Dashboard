@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence } from "motion/react";
 import RowEditModal from "@/app/components/RowEditModal";
 import SchemaEditModal from "@/app/components/SchemaEditModal";
+import { confirmDialog } from "@/app/components/ConfirmDialog";
 
 type Column = {
   id: string;
@@ -191,18 +192,18 @@ export default function DatabaseDetailPage({
   }
 
   async function deleteRow(r: Row) {
-    if (!confirm("Delete this row?")) return;
+    const ok = await confirmDialog({ title: "Delete this row?" });
+    if (!ok) return;
     await fetch(`/api/databases/${id}/rows/${r.id}`, { method: "DELETE" });
     load();
   }
 
   async function deleteDatabase() {
-    if (
-      !confirm(
-        `Delete database "${db?.name}"? This removes all rows and role grants.`
-      )
-    )
-      return;
+    const ok = await confirmDialog({
+      title: `Delete database "${db?.name}"?`,
+      message: "All rows and role grants for this database are removed.",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/databases/${id}`, { method: "DELETE" });
     if (res.ok) window.location.href = "/databases";
   }

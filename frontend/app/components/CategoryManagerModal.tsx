@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
+import { confirmDialog } from "./ConfirmDialog";
 import {
   DndContext,
   closestCenter,
@@ -356,7 +357,7 @@ export default function CategoryManagerModal({ onClose }: Props) {
   };
 
   const deleteCategory = async (id: string) => {
-    if (!confirm("Delete this category and all its subcategories?")) return;
+    if (!(await confirmDialog({ title: "Delete this category?", message: "All subcategories under it are removed as well." }))) return;
     await fetch(`/api/categories/${id}`, { method: "DELETE" });
     loadData();
   };
