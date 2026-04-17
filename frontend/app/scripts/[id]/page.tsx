@@ -1251,11 +1251,15 @@ export default function ScriptDetail() {
       {/* Two-column body */}
       <div className="p-6 grid grid-cols-[1fr_340px] gap-5 items-start">
 
-        {/* ── LEFT: code + requirements + output ── */}
+        {/* ── LEFT: code + requirements + output + runtime config ── */}
         <div className="min-w-0 space-y-4">
           <CodeEditor scriptId={id} />
           <RequirementsEditor scriptId={id} onReinstallStarted={fetchScript} />
           <OutputSection scriptId={id} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+            <VariablesSection scriptId={id} />
+            <DatabasesSection scriptId={id} isAdmin={isAdmin} />
+          </div>
         </div>
 
         {/* ── RIGHT: metadata + log history + danger ── */}
@@ -1286,12 +1290,6 @@ export default function ScriptDetail() {
               {saving ? "Saving…" : "Save"}
             </button>
           </section>
-
-          {/* Variables */}
-          <VariablesSection scriptId={id} />
-
-          {/* Databases */}
-          <DatabasesSection scriptId={id} isAdmin={isAdmin} />
 
           {/* Log history */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">

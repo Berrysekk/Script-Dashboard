@@ -21,7 +21,7 @@ export default function SectionHeader({
 }: Props) {
   const isCollapsible = typeof collapsed === "boolean" && !!onToggle;
   const titleNode = (
-    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 leading-none">
       {isCollapsible && (
         <motion.span
           animate={{ rotate: collapsed ? -90 : 0 }}
@@ -52,7 +52,7 @@ export default function SectionHeader({
   );
 
   return (
-    <div className="flex items-center justify-between gap-3 mb-3">
+    <div className="flex items-center justify-between gap-3 mb-3 min-h-[22px]">
       {isCollapsible ? (
         <button onClick={onToggle} className="flex-1 text-left cursor-pointer">
           {titleNode}
