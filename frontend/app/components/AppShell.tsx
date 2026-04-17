@@ -176,7 +176,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {/* Databases list */}
           <div className="mt-2">
             <SidebarNavLink href="/databases" label="Databases" withTopBorder withBottomBorder />
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 py-1.5">Databases</p>
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 py-1.5 mt-2">Databases</p>
             <AnimatePresence mode="popLayout">
               {databases.map(d => {
                 const active = pathname === `/databases/${d.id}`;
