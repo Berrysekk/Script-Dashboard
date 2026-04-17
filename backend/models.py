@@ -160,3 +160,7 @@ class DatabaseRowReorderRequest(BaseModel):
     row_ids: list[str]
 
 
+class ScriptDatabasesUpdateRequest(BaseModel):
+    database_ids: list[str]
+
+

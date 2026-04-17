@@ -94,7 +94,9 @@ async def test_materialized_file_appears_before_script_run(auth_client, tmp_path
         json={"values": {"ip": "9.9.9.9"}},
     )
 
-    # Directly invoke materialize_for_script with an admin-owned script_id
+    # Directly invoke materialize_for_script with an admin-owned script_id.
+    # Materialization reads from the `script_databases` grant table, so we
+    # explicitly assign the DB to the script before materializing.
     async with _db.get_db() as db:
         cur = await db.execute("SELECT id FROM scripts LIMIT 1")
         row = await cur.fetchone()
@@ -104,6 +106,7 @@ async def test_materialized_file_appears_before_script_run(auth_client, tmp_path
     script_dir = tmp_path / script_id
     script_dir.mkdir()
     async with _db.get_db() as db:
+        await dbs.set_script_databases(db, script_id, [did])
         await dbs.materialize_for_script(db, script_id, script_dir)
     path = script_dir / "databases" / "nvr.json"
     assert path.exists()
@@ -187,7 +190,9 @@ async def test_end_to_end_admin_flow(auth_client, tmp_path):
 
     script_dir = tmp_path / synthetic_script_id
     script_dir.mkdir()
+    # Per-script grants drive materialization; assign explicitly.
     async with _db.get_db() as db:
+        await dbs.set_script_databases(db, synthetic_script_id, [did])
         await dbs.materialize_for_script(db, synthetic_script_id, script_dir)
 
     payload = _json.loads((script_dir / "databases" / "nvr_list.json").read_text())

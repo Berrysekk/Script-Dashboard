@@ -48,7 +48,7 @@ export default function DatabasesPage() {
     try { j = (await res.json()) as ApiError; } catch { j = null; }
     const detail = j?.detail;
     if (res.status === 409 && typeof detail === "object" && detail?.suggestion) {
-      setError(`Slug taken. Suggestion: ${detail.suggestion}`);
+      setError(`ID taken. Suggestion: ${detail.suggestion}`);
     } else {
       setError(typeof detail === "string" ? detail : "Create failed");
     }
@@ -89,7 +89,7 @@ export default function DatabasesPage() {
     try { j = (await res.json()) as ApiError; } catch { j = null; }
     const detail = j?.detail;
     if (res.status === 409 && typeof detail === "object" && detail?.suggestion) {
-      setError(`Slug taken. Suggestion: ${detail.suggestion}`);
+      setError(`ID taken. Suggestion: ${detail.suggestion}`);
     } else {
       setError(typeof detail === "string" ? detail : "Save failed");
     }
@@ -114,7 +114,7 @@ export default function DatabasesPage() {
             />
             <input
               className={`${inputCls} flex-1 min-w-32`}
-              placeholder="Slug (optional)"
+              placeholder="ID (optional)"
               value={form.slug}
               onChange={(e) => setForm({ ...form, slug: e.target.value })}
             />
@@ -192,7 +192,7 @@ export default function DatabasesPage() {
                   />
                   <input
                     className={inputCls}
-                    placeholder="Slug"
+                    placeholder="ID"
                     value={editing.slug}
                     onChange={(e) => setEditing({ ...editing, slug: e.target.value })}
                   />

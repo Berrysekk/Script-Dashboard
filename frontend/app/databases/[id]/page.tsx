@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import Link from "next/link";
 import { AnimatePresence } from "motion/react";
 import RowEditModal from "@/app/components/RowEditModal";
 import SchemaEditModal from "@/app/components/SchemaEditModal";
@@ -139,6 +140,13 @@ export default function DatabaseDetailPage({
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6">
         <div className="min-w-0">
+          <Link
+            href="/databases"
+            className="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-neutral-400 hover:text-gray-700 dark:hover:text-neutral-200 transition-colors duration-100 mb-2"
+          >
+            <span>&larr;</span>
+            <span>Back to databases</span>
+          </Link>
           <div className="flex items-baseline gap-3 flex-wrap">
             <h1 className="text-2xl font-semibold">{db.name}</h1>
             <code className="font-mono text-xs bg-gray-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-gray-500 dark:text-neutral-400">

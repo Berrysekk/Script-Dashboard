@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { motion } from "motion/react";
 
 type Column = {
@@ -34,6 +34,8 @@ export default function SchemaEditModal({
 }: Props) {
   const [newCol, setNewCol] = useState({ name: "", key: "", type: "text", options: "" });
   const [error, setError] = useState<string | null>(null);
+  const [optionInput, setOptionInput] = useState<Record<string, string>>({});
+  const [optionError, setOptionError] = useState<Record<string, string>>({});
 
   async function addColumn(e: React.FormEvent) {
     e.preventDefault();
@@ -87,6 +89,50 @@ export default function SchemaEditModal({
       }
       onChanged();
     }
+  }
+
+  async function updateOptions(c: Column, newOptions: string[]) {
+    setOptionError((m) => ({ ...m, [c.id]: "" }));
+    const res = await fetch(`/api/databases/${databaseId}/columns/${c.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: { options: newOptions } }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const detail = j?.detail;
+      if (detail?.error === "options_in_use") {
+        const count = detail.affected_row_ids?.length ?? 0;
+        setOptionError((m) => ({
+          ...m,
+          [c.id]: `${count} row${count === 1 ? "" : "s"} still use a removed option — clear those values first.`,
+        }));
+      } else {
+        setOptionError((m) => ({
+          ...m,
+          [c.id]: typeof detail === "string" ? detail : "Update failed",
+        }));
+      }
+      return;
+    }
+    onChanged();
+  }
+
+  async function addOption(c: Column) {
+    const raw = (optionInput[c.id] ?? "").trim();
+    if (!raw) return;
+    const existing = c.config?.options ?? [];
+    if (existing.includes(raw)) {
+      setOptionError((m) => ({ ...m, [c.id]: "Option already exists." }));
+      return;
+    }
+    setOptionInput((m) => ({ ...m, [c.id]: "" }));
+    await updateOptions(c, [...existing, raw]);
+  }
+
+  async function removeOption(c: Column, option: string) {
+    const existing = c.config?.options ?? [];
+    await updateOptions(c, existing.filter((o) => o !== option));
   }
 
   async function deleteColumn(c: Column) {
@@ -144,42 +190,97 @@ export default function SchemaEditModal({
                   </thead>
                   <tbody>
                     {columns.map((c) => (
-                      <tr key={c.id} className="border-b border-gray-100 dark:border-neutral-800/60">
-                        <td className="py-2 pr-2">
-                          <input
-                            className={inputCls}
-                            defaultValue={c.name}
-                            onBlur={(e) => {
-                              if (e.target.value !== c.name) renameColumn(c, e.target.value);
-                            }}
-                          />
-                        </td>
-                        <td className="py-2 pr-2">
-                          <code className="font-mono text-xs bg-gray-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-gray-600 dark:text-neutral-400">
-                            {c.key}
-                          </code>
-                        </td>
-                        <td className="py-2 pr-2">
-                          <select
-                            className={inputCls}
-                            value={c.type}
-                            onChange={(e) => changeType(c, e.target.value)}
-                          >
-                            {COL_TYPES.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => deleteColumn(c)}
-                            className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-100"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
+                      <Fragment key={c.id}>
+                        <tr className="border-b border-gray-100 dark:border-neutral-800/60">
+                          <td className="py-2 pr-2">
+                            <input
+                              className={inputCls}
+                              defaultValue={c.name}
+                              onBlur={(e) => {
+                                if (e.target.value !== c.name) renameColumn(c, e.target.value);
+                              }}
+                            />
+                          </td>
+                          <td className="py-2 pr-2">
+                            <code className="font-mono text-xs bg-gray-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-gray-600 dark:text-neutral-400">
+                              {c.key}
+                            </code>
+                          </td>
+                          <td className="py-2 pr-2">
+                            <select
+                              className={inputCls}
+                              value={c.type}
+                              onChange={(e) => changeType(c, e.target.value)}
+                            >
+                              {COL_TYPES.map((t) => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => deleteColumn(c)}
+                              className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-100"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                        {c.type === "select" && (
+                          <tr className="border-b border-gray-100 dark:border-neutral-800/60">
+                            <td colSpan={4} className="pb-3 px-2">
+                              <div className="flex items-center gap-2 flex-wrap pl-2">
+                                <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-neutral-500">
+                                  Options
+                                </span>
+                                {(c.config?.options ?? []).map((opt) => (
+                                  <span
+                                    key={opt}
+                                    className="inline-flex items-center gap-1 text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 pl-2 pr-1 py-0.5 rounded"
+                                  >
+                                    {opt}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeOption(c, opt)}
+                                      className="text-blue-500/70 hover:text-red-500 px-0.5 leading-none"
+                                      aria-label={`Remove ${opt}`}
+                                    >
+                                      &times;
+                                    </button>
+                                  </span>
+                                ))}
+                                <input
+                                  className="text-xs border border-gray-200 dark:border-neutral-700 rounded px-2 py-1 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 w-32"
+                                  placeholder="new option"
+                                  value={optionInput[c.id] ?? ""}
+                                  onChange={(e) =>
+                                    setOptionInput((m) => ({ ...m, [c.id]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      addOption(c);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => addOption(c)}
+                                  className="text-xs px-2 py-1 rounded border border-gray-200 dark:border-neutral-700 text-gray-600 dark:text-neutral-300 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors duration-100"
+                                >
+                                  Add
+                                </button>
+                              </div>
+                              {optionError[c.id] && (
+                                <p className="text-xs text-red-600 dark:text-red-400 pl-2 mt-1">
+                                  {optionError[c.id]}
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>

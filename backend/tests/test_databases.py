@@ -409,7 +409,7 @@ async def test_reorder_rows(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_materialize_admin_sees_all(tmp_path, monkeypatch):
+async def test_materialize_includes_assigned_databases(tmp_path, monkeypatch):
     monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
     monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
     monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
@@ -427,7 +427,7 @@ async def test_materialize_admin_sees_all(tmp_path, monkeypatch):
         did = await dbs.create_database(db, "NVR", "nvr_list", None)
         await dbs.create_column(db, did, "IP", "ip", "text", None)
         await dbs.create_row(db, did, {"ip": "1.2.3.4"})
-        await db.commit()
+        await dbs.set_script_databases(db, "s1", [did])
         script_dir = tmp_path / "s1"
         script_dir.mkdir()
         await dbs.materialize_for_script(db, "s1", script_dir)
@@ -436,7 +436,8 @@ async def test_materialize_admin_sees_all(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_materialize_role_scoped(tmp_path, monkeypatch):
+async def test_materialize_scoped_to_per_script_grants(tmp_path, monkeypatch):
+    """Role grants do not drive materialization — only the per-script grant table."""
     monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
     monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
     monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
@@ -447,24 +448,27 @@ async def test_materialize_role_scoped(tmp_path, monkeypatch):
             "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
             ("u", "op", "x", "ops"),
         )
-        await db.execute(
-            "INSERT INTO roles (name) VALUES (?)", ("ops",)
-        )
+        await db.execute("INSERT INTO roles (name) VALUES (?)", ("ops",))
         await db.execute(
             "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
             ("s1", "S", "s.py", "u"),
         )
         visible = await dbs.create_database(db, "Visible", "visible", None)
-        hidden = await dbs.create_database(db, "Hidden", "hidden", None)
+        hidden  = await dbs.create_database(db, "Hidden",  "hidden",  None)
         await dbs.create_column(db, visible, "X", "x", "text", None)
         await dbs.create_row(db, visible, {"x": "yes"})
         await dbs.create_column(db, hidden, "X", "x", "text", None)
         await dbs.create_row(db, hidden, {"x": "no"})
+        # Role grant exists on both, but only per-script grant drives materialization.
         await db.execute(
             "INSERT INTO role_databases (role_name, database_id) VALUES (?, ?)",
             ("ops", visible),
         )
-        await db.commit()
+        await db.execute(
+            "INSERT INTO role_databases (role_name, database_id) VALUES (?, ?)",
+            ("ops", hidden),
+        )
+        await dbs.set_script_databases(db, "s1", [visible])
         script_dir = tmp_path / "s1"
         script_dir.mkdir()
         await dbs.materialize_for_script(db, "s1", script_dir)
@@ -473,7 +477,8 @@ async def test_materialize_role_scoped(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_materialize_orphan_script_writes_nothing(tmp_path, monkeypatch):
+async def test_materialize_without_grants_writes_nothing(tmp_path, monkeypatch):
+    """A script with no script_databases entries produces no files regardless of owner."""
     monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
     monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
     monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
@@ -481,8 +486,12 @@ async def test_materialize_orphan_script_writes_nothing(tmp_path, monkeypatch):
     await _db.init_db()
     async with _db.get_db() as db:
         await db.execute(
+            "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+            ("u_admin", "adm", "x", "admin"),
+        )
+        await db.execute(
             "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
-            ("s1", "S", "s.py", None),
+            ("s1", "S", "s.py", "u_admin"),
         )
         await dbs.create_database(db, "X", "x", None)
         await db.commit()

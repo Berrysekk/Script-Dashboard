@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import LoopPicker, { formatLoopInterval } from "../../components/LoopPicker";
 import LogDrawer from "../../components/LogDrawer";
+import { useAuth } from "../../components/AuthGate";
 import { motion, AnimatePresence } from "motion/react";
 
 type Run    = { id: string; started_at: string; finished_at?: string; exit_code?: number; status: string; };
@@ -448,6 +449,105 @@ function VariablesSection({ scriptId }: { scriptId: string }) {
             </button>
           </div>
         </>
+      )}
+    </section>
+  );
+}
+
+// ── Databases section ───────────────────────────────────────────────────────
+type DatabaseOption = { id: string; name: string; slug: string };
+
+function DatabasesSection({ scriptId, isAdmin }: { scriptId: string; isAdmin: boolean }) {
+  const [all, setAll]           = useState<DatabaseOption[] | null>(null);
+  const [assigned, setAssigned] = useState<DatabaseOption[] | null>(null);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState("");
+
+  useEffect(() => {
+    fetch(`/api/scripts/${scriptId}/databases`)
+      .then(r => r.ok ? r.json() : [])
+      .then((data: DatabaseOption[]) => setAssigned(data));
+    if (isAdmin) {
+      fetch("/api/databases")
+        .then(r => r.ok ? r.json() : [])
+        .then((data: DatabaseOption[]) => setAll(data));
+    }
+  }, [scriptId, isAdmin]);
+
+  const assignedIds = new Set((assigned ?? []).map(d => d.id));
+
+  const toggle = async (id: string) => {
+    if (!isAdmin || saving) return;
+    const next = new Set(assignedIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}/databases`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ database_ids: [...next] }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setAssigned(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
+  };
+
+  const count = assigned?.length ?? 0;
+
+  return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">
+      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        Databases
+        {count > 0 && <span className="ml-2 font-normal">({count})</span>}
+      </p>
+
+      {isAdmin ? (
+        all === null || assigned === null ? (
+          <p className="text-xs text-gray-400">Loading...</p>
+        ) : all.length === 0 ? (
+          <p className="text-xs text-gray-400">No databases exist yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {all.map(d => (
+              <label
+                key={d.id}
+                className="flex items-center gap-2 py-1 px-1 rounded hover:bg-gray-50 dark:hover:bg-neutral-800 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={assignedIds.has(d.id)}
+                  disabled={saving}
+                  onChange={() => toggle(d.id)}
+                  className="rounded border-gray-300 dark:border-neutral-600"
+                />
+                <span className="text-xs">{d.name}</span>
+                <code className="ml-auto text-[10px] font-mono text-gray-400">{d.slug}</code>
+              </label>
+            ))}
+          </div>
+        )
+      ) : assigned === null ? (
+        <p className="text-xs text-gray-400">Loading...</p>
+      ) : assigned.length === 0 ? (
+        <p className="text-xs text-gray-400">No databases assigned.</p>
+      ) : (
+        <div className="space-y-1">
+          {assigned.map(d => (
+            <div key={d.id} className="flex items-center gap-2 py-1 px-1">
+              <span className="text-xs">{d.name}</span>
+              <code className="ml-auto text-[10px] font-mono text-gray-400">{d.slug}</code>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+      {isAdmin && (
+        <p className="text-[10px] text-gray-400 mt-3">
+          Assigned databases materialize into <code className="bg-gray-100 dark:bg-neutral-800 px-1 rounded">$SCRIPT_DB_DIR</code> at run time.
+        </p>
       )}
     </section>
   );
@@ -945,6 +1045,8 @@ function RequirementsEditor({ scriptId, onReinstallStarted }: {
 export default function ScriptDetail() {
   const { id }   = useParams<{ id: string }>();
   const router   = useRouter();
+  const { user } = useAuth();
+  const isAdmin  = user?.role === "admin";
 
   const [script, setScript]       = useState<Script | null>(null);
   const [name, setName]           = useState("");
@@ -1159,6 +1261,9 @@ export default function ScriptDetail() {
 
           {/* Variables */}
           <VariablesSection scriptId={id} />
+
+          {/* Databases */}
+          <DatabasesSection scriptId={id} isAdmin={isAdmin} />
 
           {/* Log history */}
           <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4">

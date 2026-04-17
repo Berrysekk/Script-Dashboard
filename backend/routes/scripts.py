@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 import backend.db as _db
 from backend.db import get_db
 from backend.deps import current_user, require_admin
-from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest, ScriptVariableRequest, ScriptVariablesBulkRequest
+from backend.models import ScriptUpdateRequest, LoopRequest, CodeUpdateRequest, RequirementsUpdateRequest, SwapRequest, SetCategoryRequest, ScriptVariableRequest, ScriptVariablesBulkRequest, ScriptDatabasesUpdateRequest
+from backend.services import databases as dbs
 
 router = APIRouter()
 
@@ -669,3 +670,32 @@ async def delete_variable(script_id: str, key: str, user=Depends(current_user)):
         if cursor.rowcount == 0:
             raise HTTPException(404, "Variable not found")
     return {"ok": True}
+
+
+# ── Per-script database grants ─────────────────────────────────────────────
+# Databases listed here are the ONLY ones materialized into the script sandbox
+# at run time. Reads follow normal script access rules (owner or admin can view);
+# writes are admin-only because they control runtime data exposure.
+
+@router.get("/scripts/{script_id}/databases")
+async def list_script_dbs(script_id: str, user=Depends(current_user)):
+    async with get_db() as db:
+        await _assert_can_access(db, script_id, user)
+        return await dbs.list_script_databases(db, script_id)
+
+
+@router.put("/scripts/{script_id}/databases")
+async def set_script_dbs(
+    script_id: str,
+    body: ScriptDatabasesUpdateRequest,
+    _=Depends(require_admin),
+):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts WHERE id = ?", (script_id,))
+        if not await cur.fetchone():
+            raise HTTPException(404, "Script not found")
+        try:
+            await dbs.set_script_databases(db, script_id, body.database_ids)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return await dbs.list_script_databases(db, script_id)

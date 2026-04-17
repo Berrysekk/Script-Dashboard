@@ -23,14 +23,14 @@ VALID_COLUMN_TYPES = frozenset({
 
 
 def validate_slug(slug: str) -> str:
-    """Return the slug or raise ValueError."""
+    """Return the slug or raise ValueError. User-facing text calls it 'ID'."""
     if not isinstance(slug, str) or not slug:
-        raise ValueError("Slug cannot be empty")
+        raise ValueError("ID cannot be empty")
     if len(slug) > MAX_SLUG_LEN:
-        raise ValueError(f"Slug exceeds {MAX_SLUG_LEN} characters")
+        raise ValueError(f"ID exceeds {MAX_SLUG_LEN} characters")
     if not _SLUG_RE.match(slug):
         raise ValueError(
-            "Slug must match [a-z_][a-z0-9_]* (lowercase letters, digits, underscore)"
+            "ID must match [a-z_][a-z0-9_]* (lowercase letters, digits, underscore)"
         )
     return slug
 
@@ -544,27 +544,49 @@ async def reorder_rows(db, db_id: str, row_ids: list[str]) -> None:
 _log = logging.getLogger(__name__)
 
 
-async def _owner_role(db, script_id: str) -> str | None:
+async def list_script_databases(db, script_id: str) -> list[dict]:
+    """Return the databases explicitly assigned to a script (id/name/slug)."""
     cur = await db.execute(
-        "SELECT u.role FROM scripts s LEFT JOIN users u ON s.owner_id = u.id WHERE s.id = ?",
+        "SELECT d.id, d.name, d.slug "
+        "FROM script_databases sd "
+        "JOIN databases d ON d.id = sd.database_id "
+        "WHERE sd.script_id = ? "
+        "ORDER BY d.name ASC",
         (script_id,),
     )
-    row = await cur.fetchone()
-    return row["role"] if row and row["role"] else None
+    return [{"id": r["id"], "name": r["name"], "slug": r["slug"]} for r in await cur.fetchall()]
 
 
-async def _accessible_database_ids(db, role: str) -> list[str] | None:
-    """Admin role -> None (sentinel for 'all'). Otherwise list from role_databases."""
-    if role == "admin":
-        return None
-    cur = await db.execute(
-        "SELECT database_id FROM role_databases WHERE role_name = ?", (role,)
-    )
-    return [r["database_id"] for r in await cur.fetchall()]
+async def set_script_databases(db, script_id: str, database_ids: list[str]) -> None:
+    """Replace the set of databases assigned to `script_id` with `database_ids`.
+
+    Validates each id exists; raises ValueError on unknown ids. Transactional.
+    """
+    if database_ids:
+        placeholders = ",".join("?" for _ in database_ids)
+        cur = await db.execute(
+            f"SELECT id FROM databases WHERE id IN ({placeholders})",
+            tuple(database_ids),
+        )
+        found = {r["id"] for r in await cur.fetchall()}
+        missing = [i for i in database_ids if i not in found]
+        if missing:
+            raise ValueError(f"Unknown database ids: {', '.join(missing)}")
+    await db.execute("DELETE FROM script_databases WHERE script_id = ?", (script_id,))
+    for did in database_ids:
+        await db.execute(
+            "INSERT OR IGNORE INTO script_databases (script_id, database_id) VALUES (?, ?)",
+            (script_id, did),
+        )
+    await db.commit()
 
 
 async def materialize_for_script(db, script_id: str, script_dir: Path) -> None:
-    """Write one JSON file per accessible database into `<script_dir>/databases/`."""
+    """Write one JSON file per assigned database into `<script_dir>/databases/`.
+
+    The set is determined by explicit per-script grants (`script_databases`),
+    not by the owner's role — admins configure per-script access.
+    """
     target_dir = Path(script_dir) / "databases"
     if target_dir.exists():
         for entry in target_dir.iterdir():
@@ -574,20 +596,12 @@ async def materialize_for_script(db, script_id: str, script_dir: Path) -> None:
                 _log.warning("Failed to remove stale materialized file %s: %s", entry, e)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    role = await _owner_role(db, script_id)
-    if role is None:
-        return
-    accessible = await _accessible_database_ids(db, role)
-    if accessible is None:
-        cur = await db.execute("SELECT id, slug FROM databases")
-    elif not accessible:
-        return
-    else:
-        placeholders = ",".join("?" for _ in accessible)
-        cur = await db.execute(
-            f"SELECT id, slug FROM databases WHERE id IN ({placeholders})",
-            tuple(accessible),
-        )
+    cur = await db.execute(
+        "SELECT d.id, d.slug FROM script_databases sd "
+        "JOIN databases d ON d.id = sd.database_id "
+        "WHERE sd.script_id = ?",
+        (script_id,),
+    )
     for meta in await cur.fetchall():
         cur2 = await db.execute(
             "SELECT values_json FROM database_rows WHERE database_id = ? "
