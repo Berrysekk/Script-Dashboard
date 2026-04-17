@@ -1,11 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import DatabaseCard, { Database } from "../components/DatabaseCard";
 
 type User = { id: string; username: string; role: string };
 
 type FormState = { name: string; slug: string; description: string };
+
+type ApiError = { detail?: string | { error?: string; suggestion?: string } };
 
 const emptyForm: FormState = { name: "", slug: "", description: "" };
 
@@ -18,16 +20,16 @@ export default function DatabasesPage() {
 
   const isAdmin = user?.role === "admin";
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     const [meRes, dbsRes] = await Promise.all([
       fetch("/api/auth/me"),
       fetch("/api/databases"),
     ]);
     if (meRes.ok) setUser(await meRes.json());
     if (dbsRes.ok) setDbs(await dbsRes.json());
-  };
+  }, []);
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,19 +44,27 @@ export default function DatabasesPage() {
       loadAll();
       return;
     }
-    let j: any;
-    try { j = await res.json(); } catch { j = null; }
-    if (res.status === 409 && j?.detail?.suggestion) {
-      setError(`Slug taken. Suggestion: ${j.detail.suggestion}`);
+    let j: ApiError | null = null;
+    try { j = (await res.json()) as ApiError; } catch { j = null; }
+    const detail = j?.detail;
+    if (res.status === 409 && typeof detail === "object" && detail?.suggestion) {
+      setError(`Slug taken. Suggestion: ${detail.suggestion}`);
     } else {
-      setError(typeof j?.detail === "string" ? j.detail : "Create failed");
+      setError(typeof detail === "string" ? detail : "Create failed");
     }
   };
 
   const handleDelete = async (db: Database) => {
     if (!confirm(`Delete database "${db.name}"? This removes all rows and role grants.`)) return;
+    setError(null);
     const res = await fetch(`/api/databases/${db.id}`, { method: "DELETE" });
-    if (res.ok) loadAll();
+    if (res.ok) {
+      loadAll();
+      return;
+    }
+    let j: ApiError | null = null;
+    try { j = (await res.json()) as ApiError; } catch { j = null; }
+    setError(typeof j?.detail === "string" ? j.detail : "Delete failed");
   };
 
   const handleEditSave = async (e: React.FormEvent) => {
@@ -75,12 +85,13 @@ export default function DatabasesPage() {
       loadAll();
       return;
     }
-    let j: any;
-    try { j = await res.json(); } catch { j = null; }
-    if (res.status === 409 && j?.detail?.suggestion) {
-      setError(`Slug taken. Suggestion: ${j.detail.suggestion}`);
+    let j: ApiError | null = null;
+    try { j = (await res.json()) as ApiError; } catch { j = null; }
+    const detail = j?.detail;
+    if (res.status === 409 && typeof detail === "object" && detail?.suggestion) {
+      setError(`Slug taken. Suggestion: ${detail.suggestion}`);
     } else {
-      setError(typeof j?.detail === "string" ? j.detail : "Save failed");
+      setError(typeof detail === "string" ? detail : "Save failed");
     }
   };
 
@@ -150,64 +161,73 @@ export default function DatabasesPage() {
       {/* Edit modal */}
       <AnimatePresence>
         {editing && (
-          <div
-            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-            onClick={() => setEditing(null)}
-          >
+          <>
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
+              key="edit-db-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
-              className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-xl p-6 w-full max-w-md shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h2 className="font-semibold text-sm mb-4">Edit Database</h2>
-              <form onSubmit={handleEditSave} className="flex flex-col gap-3">
-                <input
-                  className={inputCls}
-                  placeholder="Name"
-                  value={editing.name}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  required
-                />
-                <input
-                  className={inputCls}
-                  placeholder="Slug"
-                  value={editing.slug}
-                  onChange={(e) => setEditing({ ...editing, slug: e.target.value })}
-                />
-                <input
-                  className={inputCls}
-                  placeholder="Description (optional)"
-                  value={editing.description ?? ""}
-                  onChange={(e) =>
-                    setEditing({ ...editing, description: e.target.value || null })
-                  }
-                />
-                {error && (
-                  <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3">
-                    {error}
+              className="fixed inset-0 bg-black/40 z-50"
+              onClick={() => setEditing(null)}
+            />
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <motion.div
+                key="edit-db-panel"
+                initial={{ opacity: 0, scale: 0.96, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-xl p-6 w-full max-w-md shadow-xl pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="font-semibold text-sm mb-4">Edit Database</h2>
+                <form onSubmit={handleEditSave} className="flex flex-col gap-3">
+                  <input
+                    className={inputCls}
+                    placeholder="Name"
+                    value={editing.name}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    required
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder="Slug"
+                    value={editing.slug}
+                    onChange={(e) => setEditing({ ...editing, slug: e.target.value })}
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder="Description (optional)"
+                    value={editing.description ?? ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, description: e.target.value || null })
+                    }
+                  />
+                  {error && (
+                    <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3">
+                      {error}
+                    </div>
+                  )}
+                  <div className="flex gap-2 justify-end mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(null)}
+                      className="text-sm px-4 py-1.5 border border-gray-200 dark:border-neutral-700 rounded text-gray-600 dark:text-neutral-400 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors duration-100"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-100"
+                    >
+                      Save
+                    </button>
                   </div>
-                )}
-                <div className="flex gap-2 justify-end mt-1">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(null)}
-                    className="text-sm px-4 py-1.5 border border-gray-200 dark:border-neutral-700 rounded text-gray-600 dark:text-neutral-400 hover:bg-gray-50 dark:hover:bg-neutral-800 transition-colors duration-100"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors duration-100"
-                  >
-                    Save
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
+                </form>
+              </motion.div>
+            </div>
+          </>
         )}
       </AnimatePresence>
     </div>
