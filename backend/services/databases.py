@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import date as _date, datetime as _datetime
@@ -601,9 +602,14 @@ async def materialize_for_script(db, script_id: str, script_dir: Path) -> None:
                 _log.warning("Skipping corrupt values_json in database %s", meta["id"])
                 continue
         try:
-            (target_dir / f"{meta['slug']}.json").write_text(
-                json.dumps(rows_out, indent=2)
-            )
+            # 0o600 — secrets are plaintext for the script; keep the file
+            # unreadable to other host users even if the data volume is looser.
+            path = target_dir / f"{meta['slug']}.json"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, json.dumps(rows_out, indent=2).encode("utf-8"))
+            finally:
+                os.close(fd)
         except OSError as e:
             _log.warning(
                 "Failed to materialize database %s for script %s: %s",

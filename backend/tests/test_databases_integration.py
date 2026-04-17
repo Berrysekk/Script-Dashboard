@@ -1,5 +1,6 @@
+import inspect
+
 import pytest
-from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -114,9 +115,10 @@ def test_safe_skip_and_blocked_keys_include_script_db_dir():
     from backend.routes import scripts
 
     assert "SCRIPT_DB_DIR" in scripts._BLOCKED_KEYS
-    src = Path("services/executor.py").read_text()
-    # Presence check on the literal string in _SAFE_SKIP
-    assert '"SCRIPT_DB_DIR"' in src
+    assert "SCRIPT_DB_DIR" in executor._SAFE_SKIP
+    # Sanity: a few other high-risk vars are also protected.
+    for key in ("PATH", "LD_PRELOAD", "PYTHONPATH", "SCRIPT_OUTPUT_DIR"):
+        assert key in executor._SAFE_SKIP, f"{key} missing from _SAFE_SKIP"
 
 
 @pytest.mark.asyncio
