@@ -226,7 +226,7 @@ export default function SchemaEditModal({
                             <button
                               type="button"
                               onClick={() => deleteColumn(c)}
-                              className="text-xs px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-100"
+                              className="text-xs px-2.5 py-1 rounded border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors duration-100"
                             >
                               Delete
                             </button>

@@ -21,7 +21,7 @@ import UploadModal from "./components/UploadModal";
 import LogDrawer   from "./components/LogDrawer";
 import CategoryManagerModal from "./components/CategoryManagerModal";
 
-type FilterView = "all" | "running" | "idle";
+type FilterView = "all" | "running" | "looping" | "idle";
 
 // Only the item at overIndex gets a transform (to active's rect). All others stay put.
 const swapStrategy: SortingStrategy = ({ rects, activeIndex, index, overIndex }) => {
@@ -244,7 +244,8 @@ export default function Dashboard() {
   };
 
   const filteredScripts = scripts.filter(s => {
-    if (filter === "running") return s.status === "running" || s.loop_enabled;
+    if (filter === "running") return s.status === "running";
+    if (filter === "looping") return s.loop_enabled;
     if (filter === "idle")    return s.status !== "running" && !s.loop_enabled;
     return true;
   });
@@ -258,18 +259,35 @@ export default function Dashboard() {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    // Swap in local state
     const idxA = scripts.findIndex(s => s.id === active.id);
     const idxB = scripts.findIndex(s => s.id === over.id);
     if (idxA === -1 || idxB === -1) return;
+    const a = scripts[idxA];
+    const b = scripts[idxB];
+
+    // Dragging an uncategorized script onto a categorized one: add, don't swap.
+    // The target keeps its position; the dragged script just adopts the target's
+    // category. Any other drag (same category, or swap across categories) keeps
+    // the existing swap semantics.
+    if (!a.category && b.category) {
+      const moved = [...scripts];
+      moved[idxA] = { ...a, category: b.category };
+      setScripts(moved);
+      await fetch(`/api/scripts/${active.id}/category`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category_id: b.category.id }),
+      });
+      await refresh();
+      return;
+    }
 
     const swapped = [...scripts];
-    swapped[idxA] = { ...scripts[idxA], category: scripts[idxB].category };
-    swapped[idxB] = { ...scripts[idxB], category: scripts[idxA].category };
+    swapped[idxA] = { ...a, category: b.category };
+    swapped[idxB] = { ...b, category: a.category };
     [swapped[idxA], swapped[idxB]] = [swapped[idxB], swapped[idxA]];
     setScripts(swapped);
 
-    // Persist
     await fetch("/api/scripts/swap", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -321,7 +339,7 @@ export default function Dashboard() {
         className="flex items-center justify-between mb-4"
       >
         <div className="flex items-center gap-1.5 relative">
-          {(["all", "running", "idle"] as const).map(f => (
+          {(["all", "running", "looping", "idle"] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}

@@ -1223,7 +1223,11 @@ export default function ScriptDetail() {
             <button
               disabled={busy}
               onClick={stop}
-              className="text-xs bg-red-50 dark:bg-red-900/20 text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-100 px-4 py-1.5 rounded font-medium disabled:opacity-50"
+              className={`text-xs px-4 py-1.5 rounded font-medium disabled:opacity-50 border ${
+                script.loop_enabled
+                  ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                  : "bg-red-50 dark:bg-red-900/20 text-red-500 border-red-200 dark:border-red-800 hover:bg-red-100"
+              }`}
             >
               {busy ? "…" : "■ Stop"}
             </button>
