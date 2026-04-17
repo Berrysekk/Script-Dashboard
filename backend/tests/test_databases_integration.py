@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -71,3 +72,48 @@ async def test_non_admin_cannot_write(auth_client, client):
     assert res.status_code == 403
     res = await client.delete(f"/api/databases/{did}")
     assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_materialized_file_appears_before_script_run(auth_client, tmp_path, monkeypatch):
+    """The executor materializes DBs into <script_dir>/databases/<slug>.json."""
+    from backend.services import executor
+    from backend import db as _db
+    from backend.services import databases as dbs
+
+    # Build a database visible to admin
+    r = await auth_client.post("/api/databases", json={"name": "NVR", "slug": "nvr"})
+    did = r.json()["id"]
+    await auth_client.post(
+        f"/api/databases/{did}/columns",
+        json={"name": "IP", "key": "ip", "type": "text"},
+    )
+    await auth_client.post(
+        f"/api/databases/{did}/rows",
+        json={"values": {"ip": "9.9.9.9"}},
+    )
+
+    # Directly invoke materialize_for_script with an admin-owned script_id
+    async with _db.get_db() as db:
+        cur = await db.execute("SELECT id FROM scripts LIMIT 1")
+        row = await cur.fetchone()
+    if row is None:
+        pytest.skip("no script fixture present")
+    script_id = row["id"]
+    script_dir = tmp_path / script_id
+    script_dir.mkdir()
+    async with _db.get_db() as db:
+        await dbs.materialize_for_script(db, script_id, script_dir)
+    path = script_dir / "databases" / "nvr.json"
+    assert path.exists()
+    assert '"ip": "9.9.9.9"' in path.read_text()
+
+
+def test_safe_skip_and_blocked_keys_include_script_db_dir():
+    from backend.services import executor
+    from backend.routes import scripts
+
+    assert "SCRIPT_DB_DIR" in scripts._BLOCKED_KEYS
+    src = Path("services/executor.py").read_text()
+    # Presence check on the literal string in _SAFE_SKIP
+    assert '"SCRIPT_DB_DIR"' in src
