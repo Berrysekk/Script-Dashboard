@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import date as _date, datetime as _datetime
@@ -537,3 +538,74 @@ async def reorder_rows(db, db_id: str, row_ids: list[str]) -> None:
             (idx, rid, db_id),
         )
     await db.commit()
+
+
+_log = logging.getLogger(__name__)
+
+
+async def _owner_role(db, script_id: str) -> str | None:
+    cur = await db.execute(
+        "SELECT u.role FROM scripts s LEFT JOIN users u ON s.owner_id = u.id WHERE s.id = ?",
+        (script_id,),
+    )
+    row = await cur.fetchone()
+    return row["role"] if row and row["role"] else None
+
+
+async def _accessible_database_ids(db, role: str) -> list[str] | None:
+    """Admin role -> None (sentinel for 'all'). Otherwise list from role_databases."""
+    if role == "admin":
+        return None
+    cur = await db.execute(
+        "SELECT database_id FROM role_databases WHERE role_name = ?", (role,)
+    )
+    return [r["database_id"] for r in await cur.fetchall()]
+
+
+async def materialize_for_script(db, script_id: str, script_dir: Path) -> None:
+    """Write one JSON file per accessible database into `<script_dir>/databases/`."""
+    target_dir = Path(script_dir) / "databases"
+    if target_dir.exists():
+        for entry in target_dir.iterdir():
+            try:
+                entry.unlink()
+            except OSError as e:
+                _log.warning("Failed to remove stale materialized file %s: %s", entry, e)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    role = await _owner_role(db, script_id)
+    if role is None:
+        return
+    accessible = await _accessible_database_ids(db, role)
+    if accessible is None:
+        cur = await db.execute("SELECT id, slug FROM databases")
+    elif not accessible:
+        return
+    else:
+        placeholders = ",".join("?" for _ in accessible)
+        cur = await db.execute(
+            f"SELECT id, slug FROM databases WHERE id IN ({placeholders})",
+            tuple(accessible),
+        )
+    for meta in await cur.fetchall():
+        cur2 = await db.execute(
+            "SELECT values_json FROM database_rows WHERE database_id = ? "
+            "ORDER BY position ASC, created_at ASC",
+            (meta["id"],),
+        )
+        rows_out: list[dict] = []
+        for r in await cur2.fetchall():
+            try:
+                rows_out.append(json.loads(r["values_json"]))
+            except (json.JSONDecodeError, TypeError):
+                _log.warning("Skipping corrupt values_json in database %s", meta["id"])
+                continue
+        try:
+            (target_dir / f"{meta['slug']}.json").write_text(
+                json.dumps(rows_out, indent=2)
+            )
+        except OSError as e:
+            _log.warning(
+                "Failed to materialize database %s for script %s: %s",
+                meta["slug"], script_id, e,
+            )

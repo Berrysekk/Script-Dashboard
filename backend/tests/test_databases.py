@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -404,3 +405,113 @@ async def test_reorder_rows(tmp_path, monkeypatch):
         )
         order = [r["id"] for r in await cur.fetchall()]
     assert order == [r2, r1]
+
+
+@pytest.mark.asyncio
+async def test_materialize_admin_sees_all(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        await db.execute(
+            "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+            ("u_admin", "admin_user", "x", "admin"),
+        )
+        await db.execute(
+            "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
+            ("s1", "S", "s.py", "u_admin"),
+        )
+        did = await dbs.create_database(db, "NVR", "nvr_list", None)
+        await dbs.create_column(db, did, "IP", "ip", "text", None)
+        await dbs.create_row(db, did, {"ip": "1.2.3.4"})
+        await db.commit()
+        script_dir = tmp_path / "s1"
+        script_dir.mkdir()
+        await dbs.materialize_for_script(db, "s1", script_dir)
+    out = json.loads((script_dir / "databases" / "nvr_list.json").read_text())
+    assert out == [{"ip": "1.2.3.4"}]
+
+
+@pytest.mark.asyncio
+async def test_materialize_role_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        await db.execute(
+            "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+            ("u", "op", "x", "ops"),
+        )
+        await db.execute(
+            "INSERT INTO roles (name) VALUES (?)", ("ops",)
+        )
+        await db.execute(
+            "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
+            ("s1", "S", "s.py", "u"),
+        )
+        visible = await dbs.create_database(db, "Visible", "visible", None)
+        hidden = await dbs.create_database(db, "Hidden", "hidden", None)
+        await dbs.create_column(db, visible, "X", "x", "text", None)
+        await dbs.create_row(db, visible, {"x": "yes"})
+        await dbs.create_column(db, hidden, "X", "x", "text", None)
+        await dbs.create_row(db, hidden, {"x": "no"})
+        await db.execute(
+            "INSERT INTO role_databases (role_name, database_id) VALUES (?, ?)",
+            ("ops", visible),
+        )
+        await db.commit()
+        script_dir = tmp_path / "s1"
+        script_dir.mkdir()
+        await dbs.materialize_for_script(db, "s1", script_dir)
+    assert (script_dir / "databases" / "visible.json").exists()
+    assert not (script_dir / "databases" / "hidden.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_materialize_orphan_script_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        await db.execute(
+            "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
+            ("s1", "S", "s.py", None),
+        )
+        await dbs.create_database(db, "X", "x", None)
+        await db.commit()
+        script_dir = tmp_path / "s1"
+        script_dir.mkdir()
+        await dbs.materialize_for_script(db, "s1", script_dir)
+    dbs_dir = script_dir / "databases"
+    assert dbs_dir.exists()
+    assert list(dbs_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_materialize_wipes_stale_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.db.DATA_DIR", tmp_path)
+    monkeypatch.setattr("backend.db.DB_PATH", tmp_path / "script-database")
+    monkeypatch.setattr("backend.db.SCRIPTS_DIR", tmp_path / "scripts")
+    monkeypatch.setattr("backend.db.LOGS_DIR", tmp_path / "logs")
+    await _db.init_db()
+    async with _db.get_db() as db:
+        await db.execute(
+            "INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)",
+            ("u", "adm", "x", "admin"),
+        )
+        await db.execute(
+            "INSERT INTO scripts (id, name, filename, owner_id) VALUES (?, ?, ?, ?)",
+            ("s1", "S", "s.py", "u"),
+        )
+        await db.commit()
+        script_dir = tmp_path / "s1"
+        (script_dir / "databases").mkdir(parents=True)
+        (script_dir / "databases" / "stale.json").write_text("[]")
+        await dbs.materialize_for_script(db, "s1", script_dir)
+    assert not (script_dir / "databases" / "stale.json").exists()
