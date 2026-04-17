@@ -52,15 +52,18 @@ export default function SectionHeader({
   );
 
   return (
-    <div className="flex items-center justify-between gap-3 mb-3 min-h-[22px]">
+    <div className="flex items-center justify-between gap-3 mb-3 min-h-[26px]">
       {isCollapsible ? (
-        <button onClick={onToggle} className="flex-1 text-left cursor-pointer">
+        <button
+          onClick={onToggle}
+          className="flex-1 flex items-center text-left cursor-pointer h-[26px] leading-none"
+        >
           {titleNode}
         </button>
       ) : (
-        titleNode
+        <div className="flex-1 flex items-center h-[26px] leading-none">{titleNode}</div>
       )}
-      {right && <div className="shrink-0 flex items-center gap-2">{right}</div>}
+      {right && <div className="shrink-0 flex items-center gap-2 h-[26px]">{right}</div>}
     </div>
   );
 }
