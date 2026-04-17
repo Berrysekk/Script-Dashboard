@@ -421,3 +421,119 @@ async def reorder_columns(db, db_id: str, column_ids: list[str]) -> None:
             (idx, cid, db_id),
         )
     await db.commit()
+
+
+class RowValidationError(ValueError):
+    def __init__(self, errors: dict[str, str]):
+        super().__init__("Row validation failed")
+        self.errors = errors
+
+
+async def _load_columns_by_key(db, db_id: str) -> dict[str, dict]:
+    cur = await db.execute(
+        "SELECT name, key, type, config FROM database_columns WHERE database_id = ?",
+        (db_id,),
+    )
+    out: dict[str, dict] = {}
+    for r in await cur.fetchall():
+        out[r["key"]] = {
+            "name": r["name"],
+            "type": r["type"],
+            "config": json.loads(r["config"]) if r["config"] else None,
+        }
+    return out
+
+
+def _coerce_values(values: dict, columns: dict[str, dict]) -> dict:
+    """Coerce an input {key: value} map against the schema. Unknown keys dropped."""
+    errors: dict[str, str] = {}
+    out: dict = {}
+    for key, raw in values.items():
+        if key not in columns:
+            continue
+        col = columns[key]
+        try:
+            out[key] = coerce_cell(col["type"], raw, col["config"])
+        except ValueError as e:
+            errors[key] = str(e)
+    if errors:
+        raise RowValidationError(errors)
+    return out
+
+
+async def create_row(db, db_id: str, values: dict) -> str:
+    cur = await db.execute("SELECT 1 FROM databases WHERE id = ?", (db_id,))
+    if not await cur.fetchone():
+        raise ValueError("Database not found")
+    cur = await db.execute(
+        "SELECT COUNT(*) AS n FROM database_rows WHERE database_id = ?", (db_id,)
+    )
+    if (await cur.fetchone())["n"] >= MAX_ROWS_PER_DB:
+        raise ValueError(f"Maximum of {MAX_ROWS_PER_DB} rows per database")
+    columns = await _load_columns_by_key(db, db_id)
+    clean = _coerce_values(values, columns)
+    serialized = json.dumps(clean)
+    if len(serialized.encode("utf-8")) > MAX_ROW_BYTES:
+        raise ValueError(f"Row exceeds {MAX_ROW_BYTES} bytes")
+    cur = await db.execute(
+        "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM database_rows WHERE database_id = ?",
+        (db_id,),
+    )
+    position = (await cur.fetchone())["p"]
+    row_id = str(uuid.uuid4())
+    await db.execute(
+        "INSERT INTO database_rows (id, database_id, values_json, position) "
+        "VALUES (?, ?, ?, ?)",
+        (row_id, db_id, serialized, position),
+    )
+    await db.commit()
+    return row_id
+
+
+async def update_row(db, db_id: str, row_id: str, values: dict) -> None:
+    cur = await db.execute(
+        "SELECT values_json FROM database_rows WHERE id = ? AND database_id = ?",
+        (row_id, db_id),
+    )
+    row = await cur.fetchone()
+    if not row:
+        raise ValueError("Row not found")
+    try:
+        current = json.loads(row["values_json"])
+    except (json.JSONDecodeError, TypeError):
+        current = {}
+    columns = await _load_columns_by_key(db, db_id)
+    patch = _coerce_values(values, columns)
+    current.update(patch)
+    serialized = json.dumps(current)
+    if len(serialized.encode("utf-8")) > MAX_ROW_BYTES:
+        raise ValueError(f"Row exceeds {MAX_ROW_BYTES} bytes")
+    await db.execute(
+        "UPDATE database_rows SET values_json = ? WHERE id = ?", (serialized, row_id)
+    )
+    await db.commit()
+
+
+async def delete_row(db, db_id: str, row_id: str) -> None:
+    cur = await db.execute(
+        "SELECT 1 FROM database_rows WHERE id = ? AND database_id = ?", (row_id, db_id)
+    )
+    if not await cur.fetchone():
+        raise ValueError("Row not found")
+    await db.execute("DELETE FROM database_rows WHERE id = ?", (row_id,))
+    await db.commit()
+
+
+async def reorder_rows(db, db_id: str, row_ids: list[str]) -> None:
+    cur = await db.execute(
+        "SELECT id FROM database_rows WHERE database_id = ?", (db_id,)
+    )
+    existing = {r["id"] for r in await cur.fetchall()}
+    if set(row_ids) != existing:
+        raise ValueError("row_ids must exactly match existing rows")
+    for idx, rid in enumerate(row_ids):
+        await db.execute(
+            "UPDATE database_rows SET position = ? WHERE id = ? AND database_id = ?",
+            (idx, rid, db_id),
+        )
+    await db.commit()
