@@ -6,12 +6,19 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, useSpring, useTransform } from "motion/react";
 import { useAuth } from "./AuthGate";
 import ConfirmDialogHost from "./ConfirmDialog";
+import SidebarNavLink from "./SidebarNavLink";
 
 type ScriptSummary = {
   id: string;
   name: string;
   status?: string;
   loop_enabled: boolean;
+};
+
+type DatabaseSummary = {
+  id: string;
+  name: string;
+  slug: string;
 };
 
 function AnimatedNumber({ value, color }: { value: number; color: string }) {
@@ -48,6 +55,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [scripts, setScripts] = useState<ScriptSummary[]>([]);
+  const [databases, setDatabases] = useState<DatabaseSummary[]>([]);
   const [mounted, setMounted] = useState(false);
   const prevPathRef = useRef(pathname);
 
@@ -55,8 +63,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/scripts");
-      if (res.ok) setScripts(await res.json());
+      const [sr, dr] = await Promise.all([
+        fetch("/api/scripts"),
+        fetch("/api/databases"),
+      ]);
+      if (sr.ok) setScripts(await sr.json());
+      if (dr.ok) setDatabases(await dr.json());
     } catch {}
   }, []);
 
@@ -65,9 +77,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const id = window.setInterval(refresh, 5000);
     const onChanged = () => refresh();
     window.addEventListener("scripts-changed", onChanged);
+    window.addEventListener("databases-changed", onChanged);
     return () => {
       window.clearInterval(id);
       window.removeEventListener("scripts-changed", onChanged);
+      window.removeEventListener("databases-changed", onChanged);
     };
   }, [refresh]);
 
@@ -112,17 +126,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         transition={{ duration: 0.15, ease: "easeOut" }}
         className="w-48 bg-white dark:bg-neutral-900 border-r border-gray-200 dark:border-neutral-800 flex flex-col shrink-0"
       >
-        {/* Dashboard link */}
-        <Link
-          href="/"
-          className={`flex items-center gap-2 px-4 py-2.5 text-[12.5px] border-b border-gray-200 dark:border-neutral-800 font-medium transition-colors duration-200
-            ${pathname === "/" ? "text-blue-600" : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"}`}
-        >
-          Dashboard
-        </Link>
+        <SidebarNavLink href="/" label="Dashboard" withBottomBorder />
 
-        {/* Script list */}
         <div className="flex-1 overflow-y-auto py-2">
+          {/* Scripts list */}
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-4 py-1.5">Scripts</p>
           <AnimatePresence mode="popLayout">
             {scripts.map(s => {
@@ -165,33 +172,54 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </AnimatePresence>
+
+          {/* Databases list */}
+          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-neutral-800/60">
+            <Link
+              href="/databases"
+              className={`flex items-center justify-between px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors duration-150
+                ${pathname === "/databases"
+                  ? "text-blue-600"
+                  : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"}`}
+            >
+              <span>Databases</span>
+              <span className="text-[10px] text-gray-300 dark:text-neutral-600 normal-case tracking-normal font-normal">all</span>
+            </Link>
+            <AnimatePresence mode="popLayout">
+              {databases.map(d => {
+                const active = pathname === `/databases/${d.id}`;
+                return (
+                  <motion.div
+                    key={d.id}
+                    layout
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8, height: 0 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    <Link
+                      href={`/databases/${d.id}`}
+                      className={`flex items-center gap-2 px-4 py-1.5 text-[12.5px] w-full transition-colors duration-150
+                        ${active
+                          ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-semibold"
+                          : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-neutral-700 shrink-0" />
+                      <span className="truncate">{d.name}</span>
+                    </Link>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
         </div>
 
         {/* Bottom actions */}
-        <div className="border-t border-gray-200 dark:border-neutral-800 p-3 flex flex-col gap-1.5">
-          <Link
-            href="/databases"
-            className={`text-xs px-3 py-1.5 rounded text-center font-medium transition-colors duration-200
-              ${pathname?.startsWith("/databases")
-                ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600"
-                : "border border-gray-200 dark:border-neutral-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}
-          >
-            Databases
-          </Link>
-          {user?.role === "admin" && (
-            <Link
-              href="/users"
-              className={`text-xs px-3 py-1.5 rounded text-center font-medium transition-colors duration-200
-                ${pathname === "/users"
-                  ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600"
-                  : "border border-gray-200 dark:border-neutral-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-neutral-800"}`}
-            >
-              Users
-            </Link>
-          )}
+        <div className="border-t border-gray-200 dark:border-neutral-800 flex flex-col">
+          {user?.role === "admin" && <SidebarNavLink href="/users" label="Users" />}
           <button
             onClick={logout}
-            className="text-xs px-3 py-1.5 rounded text-center font-medium border border-gray-200 dark:border-neutral-700 text-gray-500 hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-500 hover:border-red-200 dark:hover:border-red-800 transition-colors duration-200"
+            className="text-left px-4 py-2.5 text-[12.5px] font-medium text-gray-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors duration-200"
           >
             Sign out
           </button>

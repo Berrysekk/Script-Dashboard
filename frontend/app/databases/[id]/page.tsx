@@ -199,7 +199,10 @@ export default function DatabaseDetailPage({
     });
     if (!ok) return;
     const res = await fetch(`/api/databases/${id}`, { method: "DELETE" });
-    if (res.ok) window.location.href = "/databases";
+    if (res.ok) {
+      window.dispatchEvent(new Event("databases-changed"));
+      window.location.href = "/databases";
+    }
   }
 
   if (!db) {

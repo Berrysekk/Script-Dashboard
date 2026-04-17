@@ -43,6 +43,7 @@ export default function DatabasesPage() {
     if (res.ok) {
       setForm(emptyForm);
       loadAll();
+      window.dispatchEvent(new Event("databases-changed"));
       return;
     }
     let j: ApiError | null = null;
@@ -65,6 +66,7 @@ export default function DatabasesPage() {
     const res = await fetch(`/api/databases/${db.id}`, { method: "DELETE" });
     if (res.ok) {
       loadAll();
+      window.dispatchEvent(new Event("databases-changed"));
       return;
     }
     let j: ApiError | null = null;
