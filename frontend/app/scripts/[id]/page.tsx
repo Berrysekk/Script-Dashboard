@@ -144,14 +144,31 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const prevStatusRef               = useRef<string | undefined>(scriptStatus);
+  const genRef                      = useRef(0);
+  const abortRef                    = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
-    fetch(`/api/scripts/${scriptId}/output`)
-      .then(r => r.json())
-      .then(d => { setFiles(d); setLoading(false); });
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const gen = ++genRef.current;
+    fetch(`/api/scripts/${scriptId}/output`, { signal: ctrl.signal })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(d => {
+        if (gen !== genRef.current) return;
+        setFiles(Array.isArray(d) ? d : []);
+      })
+      .catch(() => { /* keep previous files on abort or transient errors */ })
+      .finally(() => { if (gen === genRef.current) setLoading(false); });
   }, [scriptId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    return () => {
+      abortRef.current?.abort();
+      genRef.current++;
+    };
+  }, [load]);
 
   // Poll every 1s while the script is running
   useEffect(() => {
@@ -200,7 +217,22 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
       return next;
     });
 
-  if (loading) return null;
+  if (loading) return (
+    <section className="bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+      <SectionHeader
+        title="Output Files"
+        right={
+          <button
+            onClick={load}
+            className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          >
+            Refresh
+          </button>
+        }
+      />
+      <p className="text-xs text-gray-400">Loading…</p>
+    </section>
+  );
 
   // Group files by their immediate parent directory ("" = root)
   const groups: Record<string, OutputFile[]> = {};
