@@ -274,6 +274,11 @@ export default function Dashboard() {
 
   const activeScript = activeId ? scripts.find(s => s.id === activeId) ?? null : null;
   const activeIsUncategorized = activeScript ? !activeScript.category : false;
+  // Only swap-animate sibling cards when the drag stays inside the active's
+  // own category. Dragging an uncategorized card — or a categorized card
+  // across group boundaries — suppresses sibling transforms so the target
+  // category just highlights and the drop re-renders cleanly.
+  const sameCategoryDrag = !!activeScript?.category && overCatKey === activeScript.category.id;
 
   const resolveCatKey = (overId: string): string | null => {
     if (overId.startsWith("cat:")) return overId.slice(4);
@@ -450,7 +455,7 @@ export default function Dashboard() {
             >
               <SortableContext
                 items={filteredScripts.map(s => s.id)}
-                strategy={activeIsUncategorized ? noopStrategy : swapStrategy}
+                strategy={sameCategoryDrag ? swapStrategy : noopStrategy}
               >
                 <div className="space-y-4">
                   {groupedScripts.map((group) => {
