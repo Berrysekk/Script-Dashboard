@@ -143,7 +143,7 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
   const [loading, setLoading]       = useState(true);
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set());
   const [previewFile, setPreviewFile] = useState<string | null>(null);
-  const prevStatusRef               = useRef<string | undefined>(scriptStatus);
+  const prevStatusRef               = useRef<string | undefined>(undefined);
   const genRef                      = useRef(0);
   const abortRef                    = useRef<AbortController | null>(null);
 
@@ -162,6 +162,9 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
       .finally(() => { if (gen === genRef.current) setLoading(false); });
   }, [scriptId]);
 
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+
   useEffect(() => {
     load();
     return () => {
@@ -170,20 +173,26 @@ function OutputSection({ scriptId, scriptStatus }: { scriptId: string; scriptSta
     };
   }, [load]);
 
-  // Poll every 1s while the script is running
+  // Poll every 1s while the script is running; pause when the tab is hidden.
   useEffect(() => {
     if (scriptStatus !== "running") return;
-    const t = window.setInterval(load, 1000);
-    return () => window.clearInterval(t);
-  }, [scriptStatus, load]);
+    const tick = () => { if (!document.hidden) loadRef.current(); };
+    const onVisibility = () => { if (!document.hidden) loadRef.current(); };
+    const t = window.setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [scriptStatus]);
 
-  // One final refresh on transition away from "running"
+  // One final refresh on transition away from "running".
   useEffect(() => {
     if (prevStatusRef.current === "running" && scriptStatus !== "running") {
-      load();
+      loadRef.current();
     }
     prevStatusRef.current = scriptStatus;
-  }, [scriptStatus, load]);
+  }, [scriptStatus]);
 
   const del = async (filename: string) => {
     const basename = filename.split("/").at(-1)!;
