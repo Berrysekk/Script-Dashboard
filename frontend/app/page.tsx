@@ -6,7 +6,10 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   DragEndEvent,
+  DragStartEvent,
+  DragOverEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -39,6 +42,10 @@ const swapStrategy: SortingStrategy = ({ rects, activeIndex, index, overIndex })
   }
   return null;
 };
+
+// When dragging an uncategorized script, don't animate any sibling cards —
+// the drop target is a whole category section, not another card.
+const noopStrategy: SortingStrategy = () => null;
 
 function SwappableScriptCard({
   script, onRun, onLoop, onStop, onLogs, index,
@@ -133,6 +140,7 @@ function CategorySection({
   onStop,
   onLogs,
   isDraggable,
+  highlighted = false,
 }: {
   group: { id: string | null; name: string; scripts: Script[] };
   onRun: (id: string) => Promise<void>;
@@ -140,11 +148,23 @@ function CategorySection({
   onStop: (id: string) => Promise<void>;
   onLogs: (s: Script) => void;
   isDraggable: boolean;
+  highlighted?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { setNodeRef } = useDroppable({
+    id: `cat:${group.id ?? "uncategorized"}`,
+    disabled: !isDraggable,
+  });
 
   return (
-    <div>
+    <div
+      ref={setNodeRef}
+      className={`rounded-lg p-2 -m-2 transition-colors duration-100 ${
+        highlighted
+          ? "bg-blue-50 dark:bg-blue-900/20 ring-2 ring-blue-400 dark:ring-blue-600"
+          : "ring-2 ring-transparent"
+      }`}
+    >
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="flex items-center gap-2 mb-2 group"
@@ -203,6 +223,8 @@ export default function Dashboard() {
   const [logsFor, setLogsFor]       = useState<Script | null>(null);
   const [filter, setFilter]         = useState<FilterView>("all");
   const [showCategories, setShowCategories] = useState(false);
+  const [activeId, setActiveId]     = useState<string | null>(null);
+  const [overCatKey, setOverCatKey] = useState<string | null>(null);
   const hasLoaded = useRef(false);
   const draggingRef = useRef(false);
 
@@ -250,43 +272,66 @@ export default function Dashboard() {
     return true;
   });
 
-  const handleDragStart = () => {
+  const activeScript = activeId ? scripts.find(s => s.id === activeId) ?? null : null;
+  const activeIsUncategorized = activeScript ? !activeScript.category : false;
+
+  const resolveCatKey = (overId: string): string | null => {
+    if (overId.startsWith("cat:")) return overId.slice(4);
+    const s = scripts.find(x => x.id === overId);
+    return s?.category?.id ?? (s ? "uncategorized" : null);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
     draggingRef.current = true;
+    setActiveId(String(event.active.id));
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    if (!event.over) { setOverCatKey(null); return; }
+    setOverCatKey(resolveCatKey(String(event.over.id)));
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     draggingRef.current = false;
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    const resetDragState = () => { setActiveId(null); setOverCatKey(null); };
+    if (!over || active.id === over.id) { resetDragState(); return; }
 
     const idxA = scripts.findIndex(s => s.id === active.id);
-    const idxB = scripts.findIndex(s => s.id === over.id);
-    if (idxA === -1 || idxB === -1) return;
+    if (idxA === -1) { resetDragState(); return; }
     const a = scripts[idxA];
-    const b = scripts[idxB];
 
-    // Dragging an uncategorized script onto a categorized one: add, don't swap.
-    // The target keeps its position; the dragged script just adopts the target's
-    // category. Any other drag (same category, or swap across categories) keeps
-    // the existing swap semantics.
-    if (!a.category && b.category) {
-      const moved = [...scripts];
-      moved[idxA] = { ...a, category: b.category };
+    // Case 1: dragged card is uncategorized. Drop target is a whole category
+    // (either its container or any card inside it). Move, don't swap.
+    if (!a.category) {
+      const targetKey = resolveCatKey(String(over.id));
+      if (!targetKey || targetKey === "uncategorized") { resetDragState(); return; }
+      const targetCatScript = scripts.find(s => s.category?.id === targetKey);
+      const targetCat = targetCatScript?.category ?? null;
+      if (!targetCat) { resetDragState(); return; }
+      const moved = scripts.map(s => s.id === a.id ? { ...s, category: targetCat } : s);
       setScripts(moved);
+      resetDragState();
       await fetch(`/api/scripts/${active.id}/category`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category_id: b.category.id }),
+        body: JSON.stringify({ category_id: targetCat.id }),
       });
       await refresh();
       return;
     }
+
+    // Case 2: categorized card dropped on another card → swap (existing behavior).
+    const idxB = scripts.findIndex(s => s.id === over.id);
+    if (idxB === -1) { resetDragState(); return; }
+    const b = scripts[idxB];
 
     const swapped = [...scripts];
     swapped[idxA] = { ...a, category: b.category };
     swapped[idxB] = { ...b, category: a.category };
     [swapped[idxA], swapped[idxB]] = [swapped[idxB], swapped[idxA]];
     setScripts(swapped);
+    resetDragState();
 
     await fetch("/api/scripts/swap", {
       method: "PUT",
@@ -399,21 +444,30 @@ export default function Dashboard() {
               sensors={sensors}
               collisionDetection={closestCenter}
               onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
+              onDragCancel={() => { draggingRef.current = false; setActiveId(null); setOverCatKey(null); }}
             >
-              <SortableContext items={filteredScripts.map(s => s.id)} strategy={swapStrategy}>
+              <SortableContext
+                items={filteredScripts.map(s => s.id)}
+                strategy={activeIsUncategorized ? noopStrategy : swapStrategy}
+              >
                 <div className="space-y-4">
-                  {groupedScripts.map((group) => (
-                    <CategorySection
-                      key={group.id ?? "uncategorized"}
-                      group={group}
-                      onRun={handleRun}
-                      onLoop={handleLoop}
-                      onStop={handleStop}
-                      onLogs={setLogsFor}
-                      isDraggable
-                    />
-                  ))}
+                  {groupedScripts.map((group) => {
+                    const key = group.id ?? "uncategorized";
+                    return (
+                      <CategorySection
+                        key={key}
+                        group={group}
+                        onRun={handleRun}
+                        onLoop={handleLoop}
+                        onStop={handleStop}
+                        onLogs={setLogsFor}
+                        isDraggable
+                        highlighted={activeIsUncategorized && overCatKey === key && key !== "uncategorized"}
+                      />
+                    );
+                  })}
                 </div>
               </SortableContext>
             </DndContext>
@@ -436,7 +490,9 @@ export default function Dashboard() {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onDragCancel={() => { draggingRef.current = false; setActiveId(null); setOverCatKey(null); }}
           >
             <SortableContext items={filteredScripts.map(s => s.id)} strategy={swapStrategy}>
               <div className="grid grid-cols-3 gap-3">
